@@ -1,0 +1,86 @@
+========================================
+Dataset: Tech Growth Stock (synthetic demo data)
+========================================
+Rows: 300 | Current price: 171.36
+
+-- Linear Regression --
+RMSE: 2.7666  MAE: 2.1168  MAPE: 1.34%  R^2: 0.8897  Accuracy: 98.66%
+Predicted next close: 172.46 (rough 95% band 168.61-176.30, 0.64% change) -> Signal: BUY
+
+-- AR(10) Time-Series (linear, NOT an LSTM) --
+RMSE: 2.7135  MAE: 2.0516  MAPE: 1.29%  R^2: 0.8939  Accuracy: 98.71%
+Predicted next close: 171.74 (rough 95% band 167.89-175.58, 0.22% change) -> Signal: HOLD
+
+-- Exponential Smoothing (Holt, alpha=0.3, beta=0.1) --
+RMSE: 3.1123  MAE: 2.4523  MAPE: 1.54%  R^2: 0.8592  Accuracy: 98.46%
+Predicted next close: 170.76 (rough 95% band 165.30-176.21, -0.35% change) -> Signal: HOLD
+
+-- 3-fold walk-forward validation (more robust than one split) --
+LR:  mean RMSE 2.5518 | mean R^2 0.9017
+AR:  mean RMSE 2.4843 | mean R^2 0.9067
+ES:  mean RMSE 3.0894 | mean R^2 0.8695
+
+-- Backtest (Linear Regression signal, starting capital 100000, no costs) --
+Trades: 1 (0 completed) | Strategy final: 114383.24 (14.38%) | Buy&Hold final: 111677.51 (11.68%)
+Max drawdown: 7.63% | Annualized volatility: 26.30%
+
+-- Same backtest with 0.1% transaction cost + 0.05% slippage per trade --
+Strategy final: 114211.66 (14.21%)
+
+========================================
+Dataset: Blue Chip Stock (synthetic demo data)
+========================================
+Rows: 300 | Current price: 243.71
+
+-- Linear Regression --
+RMSE: 1.6511  MAE: 1.3427  MAPE: 0.53%  R^2: 0.9318  Accuracy: 99.47%
+Predicted next close: 243.52 (rough 95% band 239.96-247.08, -0.08% change) -> Signal: HOLD
+
+-- AR(10) Time-Series (linear, NOT an LSTM) --
+RMSE: 1.6495  MAE: 1.2981  MAPE: 0.52%  R^2: 0.9319  Accuracy: 99.48%
+Predicted next close: 244.18 (rough 95% band 240.57-247.79, 0.19% change) -> Signal: HOLD
+
+-- Exponential Smoothing (Holt, alpha=0.3, beta=0.1) --
+RMSE: 2.7713  MAE: 2.2872  MAPE: 0.90%  R^2: 0.8123  Accuracy: 99.10%
+Predicted next close: 244.25 (rough 95% band 239.50-249.00, 0.22% change) -> Signal: HOLD
+
+-- 3-fold walk-forward validation (more robust than one split) --
+LR:  mean RMSE 2.1837 | mean R^2 0.7766
+AR:  mean RMSE 2.2108 | mean R^2 0.7686
+ES:  mean RMSE 2.6407 | mean R^2 0.7098
+
+-- Backtest (Linear Regression signal, starting capital 100000, no costs) --
+Trades: 1 (0 completed) | Strategy final: 99078.31 (-0.92%) | Buy&Hold final: 93923.22 (-6.08%)
+Max drawdown: 4.01% | Annualized volatility: 7.66%
+
+-- Same backtest with 0.1% transaction cost + 0.05% slippage per trade --
+Strategy final: 98929.70 (-1.07%)
+
+========================================
+Dataset: Volatile Stock (synthetic demo data)
+========================================
+Rows: 300 | Current price: 215.74
+
+-- Linear Regression --
+RMSE: 6.6117  MAE: 5.3184  MAPE: 2.72%  R^2: 0.8939  Accuracy: 97.28%
+Predicted next close: 212.55 (rough 95% band 206.72-218.38, -1.48% change) -> Signal: SELL
+
+-- AR(10) Time-Series (linear, NOT an LSTM) --
+RMSE: 6.3674  MAE: 5.2164  MAPE: 2.67%  R^2: 0.9016  Accuracy: 97.33%
+Predicted next close: 212.34 (rough 95% band 206.47-218.21, -1.58% change) -> Signal: SELL
+
+-- Exponential Smoothing (Holt, alpha=0.3, beta=0.1) --
+RMSE: 8.3150  MAE: 6.9425  MAPE: 3.65%  R^2: 0.8592  Accuracy: 96.35%
+Predicted next close: 213.31 (rough 95% band 204.92-221.70, -1.13% change) -> Signal: SELL
+
+-- 3-fold walk-forward validation (more robust than one split) --
+LR:  mean RMSE 4.1019 | mean R^2 0.7028
+AR:  mean RMSE 4.0102 | mean R^2 0.6834
+ES:  mean RMSE 4.9997 | mean R^2 0.4703
+
+-- Backtest (Linear Regression signal, starting capital 100000, no costs) --
+Trades: 0 (0 completed) | Strategy final: 100000.00 (0.00%) | Buy&Hold final: 144482.67 (44.48%)
+Max drawdown: 0.00% | Annualized volatility: 0.00%
+
+-- Same backtest with 0.1% transaction cost + 0.05% slippage per trade --
+Strategy final: 100000.00 (0.00%)

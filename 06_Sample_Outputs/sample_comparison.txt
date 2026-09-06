@@ -1,0 +1,21 @@
+MODEL COMPARISON
+Dataset: Tech Growth Stock (synthetic demo data)
+Current split: 80% / 20%
+ 
+Linear Regression:
+  RMSE=2.7665684   MAE=2.1168274   MAPE=1.3363104%   R^2=0.8896887
+  3-fold walk-forward: mean RMSE=2.5517655   mean R^2=0.9016504
+ 
+AR(10):
+  RMSE=2.7134684   MAE=2.0516284   MAPE=1.2949044%   R^2=0.8938826
+  3-fold walk-forward: mean RMSE=2.4842922   mean R^2=0.9067298
+ 
+Exponential Smoothing (a=0.3, b=0.1):
+  RMSE=3.1122527   MAE=2.4522682   MAPE=1.5412351%   R^2=0.8592378
+  3-fold walk-forward: mean RMSE=3.0893513   mean R^2=0.8694788
+ 
+[Lower RMSE/MAE/MAPE is better. R^2 closer to 1 is better. The
+ walk-forward numbers are the more trustworthy comparison --
+ they average over several sequential train/test folds instead
+ of relying on just one chronological split. See the chart window
+ for the same numbers side by side.]
