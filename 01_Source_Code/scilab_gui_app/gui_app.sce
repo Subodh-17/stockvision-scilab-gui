@@ -1,1167 +1,1106 @@
 // ============================================================================
-// gui_app.sce
-// -----------------------------------------------------------------------
-// Interactive Scilab GUI: Stock Market Analysis & Prediction Studio
+// gui_app.sce -- StockVision: unified stock analysis & prediction dashboard.
 //
-// An educational tool for exploring how three different predictive models --
-// Linear Regression, an AR (autoregressive) time-series model, and
-// Exponential Smoothing (Holt's linear trend method) -- behave on real
-// stock price data. Pick a dataset, pick a model, drag the train/test split
-// slider, and immediately see the fitted chart, accuracy metrics, and a
-// next-day BUY/SELL/HOLD signal update. A backtest simulator then answers
-// the practical follow-up question: "would actually following this model's
-// signals have been worth it?" -- by walking the model's signal through the
-// whole test period (with a realistic one-day signal-to-trade lag and
-// optional transaction costs) and comparing the resulting portfolio value
-// against a simple buy-and-hold baseline.
+// One Scilab figure holds everything: controls, three embedded charts
+// (price/forecast, model comparison, backtest equity) and the text panels
+// (data quality, results, comparison, walk-forward, backtest, assumptions).
+// Nothing opens in a separate window.
 //
-// GUI components used (well beyond the "at least three" minimum):
-//   uimenu (File, Help), popupmenu x2 (dataset picker, model picker --
-//   see the note above on_model_changed() for why a single popupmenu
-//   replaced the model picker's original two radiobuttons), slider
-//   (train/test split), checkbox (moving-average overlay, auto-redraws on
-//   toggle), edit x5 (buy/sell thresholds, AR lookback, transaction cost,
-//   slippage), pushbutton x6 (Run Analysis, Run Backtest, Model Info,
-//   Reset, Compare Models, Export Results), frame x5 (panel grouping),
-//   text (multiple labels, results display, and a colour-coded
-//   BUY/SELL/HOLD indicator -- see on_run_analysis()), and three dedicated
-//   chart windows (Run Analysis, Run Backtest, and Compare Models each open
-//   their own, entirely separate from this main window -- see
-//   CHART_FIGURE_ID / BACKTEST_FIGURE_ID / COMPARE_FIGURE_ID below for why:
-//   this main window must never be the target of a clf/scf/xdel call, since
-//   that would clear every uicontrol in the app along with any plotted
-//   content).
-//
-// All the actual modeling math lives in model_engine.sce (see that file's
-// header) -- this file only builds widgets and wires their callbacks to
-// those already-tested functions. No modeling logic is duplicated here.
-// Every call into model_engine.sce that can fail on bad input (loading a
-// file, fitting a model) is wrapped in try/catch so a malformed CSV or a
-// degenerate split shows a friendly popup instead of dumping a raw Scilab
-// error to the console.
-//
-// Run with:  scilab -f gui_app.sce
-// (Needs a real display -- see README.md for why this can't be verified
-// from a headless/CI environment, and what WAS verified instead.)
-//
-// REVISION NOTE (this version): added a third model (Exponential Smoothing,
-// see model_engine.sce), replaced the two-radiobutton model picker with a
-// single popupmenu, added a colour-coded BUY/SELL/HOLD indicator next to
-// the Results panel, replaced the Compare/Backtest blocking popups with
-// in-panel results text plus (for Compare) a genuine bar-chart window, and
-// added gridlines/thicker lines to all three chart windows. Every change
-// here was verified as far as this sandboxed environment allows: all
-// model_engine.sce logic (including the new Exponential Smoothing
-// functions) was run and checked against hand-computed values via
-// test_model_engine.sce under scilab-cli. The uicontrol/graphics changes in
-// THIS file could not be executed in this particular sandbox -- see
-// README.md for the same headless-environment limitation the original
-// version of this file already notes above -- so they were written by
-// closely following this file's own established, working patterns (the
-// dataset popupmenu already here for the model popupmenu; the existing
-// plot()/legend()/xtitle() calls for the new chart polish) and, for the two
-// pieces of genuinely new graphics-handle code (custom bar-chart tick
-// labels, and line-thickness styling), wrapped in try/catch so that if any
-// of it behaves unexpectedly on a given Scilab build, the feature still
-// works correctly -- just without that specific cosmetic polish -- rather
-// than failing.
+// Run from this folder:  exec("gui_app.sce", -1);
+// All modelling lives in model_engine.sce; this file only builds widgets,
+// holds state and renders results. The figure is never cleared with
+// clf()/scf()/xdel(): charts are refreshed by deleting the children of their
+// own axes only, so the controls always survive.
 // ============================================================================
 
-clear;
-clc;
-exec("model_engine.sce", -1);
+clear; clc;
 
-// ---------------------------------------------------------------------------
-// Figure IDs -- explicitly pinned for the two chart windows so they can
-// never collide with the main GUI window. Deliberately large, unusual
-// numbers (101, 102) rather than small ones (0, 1, 2, ...) -- the main
-// window's own ID is left to Scilab's normal auto-assignment (which
-// reliably starts low, at 0 or 1) rather than read back via a
-// gui.fig.figure_id property access this app has never actually exercised
-// at runtime, so there is nothing here that depends on that working.
-// CRITICAL: nothing in this file may ever call clf()/scf()/xdel() on
-// gui.fig (the main window). clf() clears a figure's uicontrol children
-// along with its plotted content, so calling it on the figure holding
-// every button, slider, and panel would destroy the entire GUI the moment
-// a chart was drawn or the Reset button was clicked -- exactly the bug
-// this separation exists to make structurally impossible.
-// ---------------------------------------------------------------------------
-global CHART_FIGURE_ID; global BACKTEST_FIGURE_ID; global COMPARE_FIGURE_ID;
-CHART_FIGURE_ID = 101;
-BACKTEST_FIGURE_ID = 102;
-COMPARE_FIGURE_ID = 103;   // dedicated window for the "Compare" bar chart --
-                            // same isolation rule as the other two: never
-                            // scf/clf'd onto gui.fig.
+// Resolve the app folder so the script works from any working directory.
+APP_DIR = "";
+try
+    APP_DIR = get_absolute_file_path("gui_app.sce");
+catch
+    APP_DIR = pwd() + filesep();
+end
+global APP_DIR;
+exec(APP_DIR + "model_engine.sce", -1);
 
-// Exponential Smoothing (Holt's linear trend) hyperparameters -- fixed
-// constants rather than extra GUI edit boxes. alpha=0.3/beta=0.1 are
-// commonly-used, moderately-smoothed defaults (see Model Info for this
-// model). Deliberately not exposed as separate tunable controls: this app
-// already gives the user four real levers (dataset / model / split /
-// thresholds), and most people comparing three models via the Compare
-// button want a sane default, not another pair of knobs to guess at.
-global ES_ALPHA; global ES_BETA;
-ES_ALPHA = 0.3;
-ES_BETA = 0.1;
-
-
-// ---------------------------------------------------------------------------
-// Global state -- shared between the main script and every callback.
-// Scilab uicontrol callbacks execute as top-level strings, so this is the
-// standard way to give them access to widget handles and the current
-// dataset/model without passing arguments through the callback string.
-// ---------------------------------------------------------------------------
-global gui;             // struct of all widget handles
-global app_state;       // struct of current dataset / model / results
+global gui app_state gui_quiet ES_ALPHA ES_BETA GUI_BG GUI_HEAD;
+if ~exists("gui_quiet") | isempty(gui_quiet) then gui_quiet = %f; end   // %t: print instead of dialogs
+ES_ALPHA = 0.3; ES_BETA = 0.1;                                          // fixed Holt parameters
 
 gui = struct();
 app_state = struct();
-app_state.dataset_files = ["sample_data/tech_growth_stock.csv", ..
-                            "sample_data/blue_chip_stock.csv", ..
-                            "sample_data/volatile_stock.csv"];
-app_state.dataset_labels = ["Tech Growth Stock (synthetic demo data)", ..
-                             "Blue Chip Stock (synthetic demo data)", ..
-                             "Volatile Stock (synthetic demo data)"];
-app_state.custom_csv_path = "";   // set via File > Load Custom CSV...
+app_state.dataset_files = [APP_DIR + "sample_data/tech_growth_stock.csv", ..
+                           APP_DIR + "sample_data/blue_chip_stock.csv", ..
+                           APP_DIR + "sample_data/volatile_stock.csv"];
+app_state.dataset_labels = ["Tech Growth Stock (synthetic)", "Blue Chip Stock (synthetic)", ..
+                            "Volatile Stock (synthetic)"];
+app_state.dataset_idx = 1;
+app_state.custom_path = "";
 app_state.data = [];
-app_state.model = [];
-app_state.model_type = "LR";      // "LR", "AR", or "ES" -- the live model-picker selection
-app_state.last_fitted_model_type = "";   // which type app_state.model actually is (see on_run_analysis)
-app_state.last_plot = [];         // cached chart data, so the MA checkbox can redraw without a re-fit
-app_state.last_results = [];      // canonical last-analysis snapshot, used by Export Results
-app_state.last_backtest = [];     // cached for Export Results
+app_state.dq = [];
+app_state.model_type = "LR";
 app_state.split_ratio = 0.8;
 app_state.ar_lookback = 10;
-app_state.buy_threshold = 0.5;
-app_state.sell_threshold = -0.5;
-app_state.transaction_cost_pct = 0;
-app_state.slippage_pct = 0;
+app_state.n_folds = 5;
+app_state.analysis = [];     // run_model result for the selected model
+app_state.naive = [];        // naive baseline on the same window
+app_state.signal = [];
+app_state.cmp = [];          // compare_models result (all models + walk-forward)
+app_state.bt = [];           // run_backtest result for the analysed model
+app_state.show_ma = %t;
+app_state.info_tab = "dq";   // top-right panel: "dq" or "asm"
+app_state.info_dq = ""; app_state.info_asm = "";
 
-MODEL_INFO_TEXT = struct();
-MODEL_INFO_TEXT("LR") = [
-"LINEAR REGRESSION"; " "; ..
-"Fits a straight-line (well, straight-hyperplane) relationship"; ..
-"between 12 engineered features -- lagged prices, moving"; ..
-"averages, volatility, daily return -- and the next closing"; ..
-"price. Fast, interpretable (you can read the coefficients),"; ..
-"but assumes a fixed linear relationship that does not adapt to"; ..
-"changing market regimes."];
-MODEL_INFO_TEXT("AR") = [
-"AR (AUTOREGRESSIVE) TIME-SERIES MODEL"; " "; ..
-"Predicts the next price directly from a window of the last"; ..
-"N days of its own closing prices (N = the lookback set in the"; ..
-"Thresholds & Costs panel, default 10) -- a genuine sequential"; ..
-"model, same SPIRIT as feeding a lookback window into an LSTM."; ..
-"But to be precise: this is a LINEAR model fit by ordinary"; ..
-"least squares. It is NOT an LSTM -- no gates, no nonlinearity,"; ..
-"no learned memory. It captures short-memory momentum patterns"; ..
-"the feature-based LR model does not see directly, using plain"; ..
-"linear algebra to do it."];
-MODEL_INFO_TEXT("ES") = [
-"EXPONENTIAL SMOOTHING (HOLT LINEAR TREND METHOD)"; " "; ..
-"Keeps a single running LEVEL and TREND estimate that updates"; ..
-"day by day as each new price arrives, and forecasts one step"; ..
-"ahead as level + trend. Unlike Linear Regression (many engineered"; ..
-"features) or AR (a fixed lookback window), this model only ever"; ..
-"remembers a running summary of the past, not the raw prices"; ..
-"themselves -- closer in spirit to how a simple moving average"; ..
-"adapts, but with an explicit trend term as well as a level."; ..
-"Smoothing parameters alpha=" + string(ES_ALPHA) + " (level) and beta=" + ..
-    string(ES_BETA) + " (trend)"; ..
-"are fixed, commonly-used defaults, not fit from this data."];
+// Palette
+GUI_BG = [0.93 0.94 0.95];
+GUI_HEAD = [0.13 0.25 0.42];
+GUI_WHITE = [1 1 1];
 
 
 // ---------------------------------------------------------------------------
-// Small shared helpers
+// Small helpers
 // ---------------------------------------------------------------------------
-function invalidate_model()
-    // Clears whatever was previously fit -- called whenever the dataset or
-    // the train/test split changes, so a stale model fit to different data
-    // can never silently linger and get backtested or exported.
-    global gui app_state
-    app_state.model = [];
-    app_state.last_fitted_model_type = "";
-    app_state.last_plot = [];
-    app_state.last_results = [];
-    set(gui.results_text, "string", "Run an analysis to see results here.");
+function r = has(x)
+    r = (typeof(x) == "st");
 endfunction
 
-function val = read_numeric_edit(handle, default_val)
-    // Reads a GUI edit box as a number; falls back to default_val (and
-    // writes it back into the box so the user can see what was actually
-    // used) if the box contains something unparseable, instead of letting
-    // garbage input silently propagate into the model.
-    s = stripblanks(get(handle, "string"));
-    if is_valid_number_string(s) then
-        val = strtod(s);
+
+function set_status(msg, level)
+    // level: "info" (grey), "ok" (green), "error" (red).
+    global gui
+    if argn(2) < 2 then level = "info"; end
+    select level
+    case "ok" then col = [0.05 0.45 0.15];
+    case "error" then col = [0.75 0.1 0.1];
+    else col = [0.15 0.15 0.15];
+    end
+    set(gui.status, "foregroundcolor", col);
+    set(gui.status, "string", " " + msg);
+    drawnow();
+endfunction
+
+
+function show_dialog(title, msg, kind)
+    // Popups only for real problems; in quiet mode (scripted runs) print.
+    global gui_quiet
+    if gui_quiet then
+        mprintf("[%s] %s\n", title, strcat(msg, " / "));
     else
-        val = default_val;
-        set(handle, "string", string(default_val));
+        messagebox(msg, title, kind);
     end
 endfunction
 
-function redraw_chart()
-    // Redraws the main chart from app_state.last_plot -- shared by
-    // on_run_analysis (after a fresh fit) and on_ma_toggle (checkbox flip,
-    // no re-fit needed). Always draws into CHART_FIGURE_ID, a dedicated
-    // figure window separate from the main GUI window (gui.fig) -- NEVER
-    // scf/clf on gui.fig itself, since clf() clears a figure's uicontrol
-    // children along with its plotted content, which would wipe out every
-    // button, slider, and panel in the app the moment a chart was drawn.
-    global gui app_state
-    global CHART_FIGURE_ID
-    lp = app_state.last_plot;
-    scf(CHART_FIGURE_ID);
-    clf(CHART_FIGURE_ID);
-    plot(1:size(lp.y_test_plot,1), lp.y_test_plot, "k-");
-    plot(1:size(lp.y_pred_plot,1), lp.y_pred_plot, "r--");
-    legend_entries = ["Actual Price", lp.model_name + " Predicted Price"];
 
-    if get(gui.cb_moving_avg, "value") == 1 then
-        ma20 = moving_average(lp.y_test_plot, 20, lp.ma_history);
-        plot(1:size(ma20,1), ma20, "b-.");
-        legend_entries = [legend_entries, "20-Day Moving Average"];
-    end
-    xtitle(lp.model_name + " -- Actual vs Predicted (Test Set)", "Time", "Stock Price");
-    legend(legend_entries, 2);
+function out = html_escape(s)
+    out = strsubst(s, "&", "&amp;");
+    out = strsubst(out, "<", "&lt;");
+    out = strsubst(out, ">", "&gt;");
+endfunction
 
-    // Visual polish: gridlines + thicker lines read far better in a
-    // screenshot/demo than the plain default. Wrapped defensively (see the
-    // Compare chart above for the same rationale) -- if the exact handle
-    // shape here ever differs on some Scilab build, the chart still renders
-    // correctly, just without the extra polish.
-    try
-        ax = gca();
-        ax.grid = [color("light gray") color("light gray")];
-        for k = 1:size(ax.children)
-            if typeof(ax.children(k)) == "Compound" then
-                for c = 1:size(ax.children(k).children)
-                    ax.children(k).children(c).thickness = 2;
+
+function out = to_html_lines(lines)
+    // Listbox rows as HTML: keeps spacing (&nbsp;), bolds best-value cells
+    // (tokens ending in '*') in green, and colours signal / baseline lines.
+    out = repmat("", size(lines, 1), 1);
+    for k = 1:size(lines, 1)
+        s = html_escape(lines(k));
+        body = ""; i = 1; n = length(s);
+        while i <= n
+            c = part(s, i);
+            if c == " " then
+                body = body + "&nbsp;"; i = i + 1;
+            else
+                j = i;
+                while j <= n & part(s, j) <> " "
+                    j = j + 1;
                 end
+                tok = part(s, i:j-1);
+                if length(tok) > 1 & part(tok, length(tok)) == "*" & or(part(tok, 1) == ["0","1","2","3","4","5","6","7","8","9","-","+","."]) then
+                    tok = "<span style=''color:#0a7d2e;font-weight:bold''>" + tok + "</span>";
+                end
+                body = body + tok; i = j;
             end
         end
-    catch
+        col = "";
+        raw = lines(k);
+        if part(raw, 1:7) == "Signal:" then
+            if strindex(raw, "BUY") <> [] then col = "#0a7d2e";
+            elseif strindex(raw, "SELL") <> [] then col = "#b01818";
+            else col = "#8a6d00"; end
+        elseif strindex(raw, "does NOT beat") <> [] | strindex(raw, "No StockVision model") <> [] then
+            col = "#b01818";
+        elseif part(raw, 1:12) == "Model status" then
+            col = "#0a7d2e";
+        end
+        if col <> "" then
+            body = "<span style=''color:" + col + ";font-weight:bold''>" + body + "</span>";
+        end
+        out(k) = "<html>" + body + "</html>";
+    end
+endfunction
+
+
+function set_list(h, lines)
+    set(h, "string", to_html_lines(lines));
+    set(h, "value", []);
+endfunction
+
+
+function [ok, p, msg] = read_params()
+    // Validates every edit box. On failure ok=%f and msg says which field.
+    global gui
+    p = struct(); msg = ""; ok = %f;
+    names = ["Buy threshold", "Sell threshold", "Starting capital", "Transaction cost", "Slippage"];
+    hs = list(gui.ed_buy, gui.ed_sell, gui.ed_capital, gui.ed_cost, gui.ed_slip);
+    v = zeros(1, 5);
+    for k = 1:5
+        s = stripblanks(get(hs(k), "string"));
+        if ~is_valid_number_string(s) then
+            msg = names(k) + " must be a plain number (got [" + s + "])."; return
+        end
+        v(k) = strtod(s);
+    end
+    if v(1) <= v(2) then msg = "Buy threshold must be greater than the sell threshold."; return; end
+    if v(3) <= 0 then msg = "Starting capital must be positive."; return; end
+    if v(4) < 0 | v(4) > 10 | v(5) < 0 | v(5) > 10 then
+        msg = "Transaction cost and slippage must be between 0 and 10 (percent)."; return
+    end
+    p.buy = v(1); p.sell = v(2); p.capital = v(3); p.cost = v(4); p.slip = v(5);
+    ok = %t;
+endfunction
+
+
+function [ok, lb, nf, msg] = read_model_params()
+    global gui
+    ok = %f; lb = 10; nf = 5; msg = "";
+    s1 = stripblanks(get(gui.ed_lookback, "string"));
+    s2 = stripblanks(get(gui.ed_folds, "string"));
+    if ~is_valid_number_string(s1) | strtod(s1) <> round(strtod(s1)) | strtod(s1) < 2 | strtod(s1) > 60 then
+        msg = "AR lookback must be a whole number from 2 to 60."; return
+    end
+    if ~is_valid_number_string(s2) | strtod(s2) <> round(strtod(s2)) | strtod(s2) < 1 | strtod(s2) > 10 then
+        msg = "Walk-forward folds must be a whole number from 1 to 10."; return
+    end
+    lb = strtod(s1); nf = strtod(s2); ok = %t;
+endfunction
+
+
+function set_button_states()
+    // Disable actions whose prerequisites are missing.
+    global gui app_state
+    have_data = has(app_state.data);
+    have_an = has(app_state.analysis);
+    set(gui.btn_run, "enable", tf_str(have_data));
+    set(gui.btn_compare, "enable", tf_str(have_data));
+    set(gui.btn_wf, "enable", tf_str(have_data));
+    set(gui.btn_backtest, "enable", tf_str(have_an));
+    set(gui.btn_export, "enable", tf_str(have_an));
+endfunction
+
+
+function s = tf_str(b)
+    if b then s = "on"; else s = "off"; end
+endfunction
+
+
+function nm = model_display_name(key)
+    global app_state ES_ALPHA ES_BETA
+    select key
+    case "LR" then nm = "Linear Regression";
+    case "AR" then nm = "AR(" + string(app_state.ar_lookback) + ")";
+    case "ES" then nm = "Exp. Smoothing";
+    else nm = key;
     end
 endfunction
 
 
 // ---------------------------------------------------------------------------
-// Callback: dataset selector changed -> reload data, don't re-run yet
+// Chart drawing (embedded axes; only each axes' own children are deleted)
 // ---------------------------------------------------------------------------
-function on_dataset_changed()
+function ax = make_axes(x, y, w, h)
+    // Axes occupying the normalized panel (x, y, w, h), origin bottom-left.
+    // axes_bounds uses a top-left origin, hence 1 - (y + h).
+    global gui
+    ax = newaxes(gui.fig);
+    ax.axes_bounds = [x, 1 - (y + h), w, h];
+    ax.margins = [0.10, 0.03, 0.04, 0.17];
+    ax.background = color(255, 255, 255);
+    ax.box = "on";
+    ax.font_size = 2;
+    ax.grid = [color(225, 225, 225), color(225, 225, 225)];
+endfunction
+
+
+function clear_axes(ax, ph, msg)
+    // Empty state: hide the axes and show a native placeholder (frame + text),
+    // which paints reliably before any plot exists.
+    sca(ax);
+    delete(ax.children);
+    ax.visible = "off";
+    set(ph(1), "visible", "on"); set(ph(2), "string", msg); set(ph(2), "visible", "on");
+endfunction
+
+
+function restore_axes(ax, ph)
+    // Plot mode: hide the placeholder, clear old content, restore margins.
+    set(ph(1), "visible", "off"); set(ph(2), "visible", "off");
+    sca(ax); delete(ax.children);
+    ax.visible = "on";
+    ax.margins = [0.10, 0.03, 0.04, 0.17]; ax.box = "on";
+    ax.axes_visible = ["on", "on", "on"];
+endfunction
+
+
+function style_last(col, thick, lstyle)
+    // Colour/width/style of the polyline created by the last plot() call.
+    e = gce();
+    p = e.children(1);
+    p.foreground = color(col(1), col(2), col(3));
+    p.thickness = thick;
+    p.line_style = lstyle;
+endfunction
+
+
+function set_date_ticks(ax, dates, x_lo, x_hi)
+    // ~6 evenly spaced date labels (yy-mm-dd) along the x axis.
+    idx = unique(round(linspace(x_lo, x_hi, 6)));
+    idx = idx(idx >= 1 & idx <= size(dates, 1));
+    labs = part(dates(idx), 3:10);
+    ax.x_ticks = tlist(["ticks", "locations", "labels"], idx(:), labs(:));
+endfunction
+
+
+function t = key_span(col, txt)
+    t = "<b style=''color:" + col + "''>" + txt + "</b>";
+endfunction
+
+
+function s = main_key_html(show_ma)
+    // Colour key matching the plotted lines (HTML label above the chart).
+    s = "<html>&nbsp;" + key_span("#8290a8", "&#9472; Training close") + "&nbsp;&nbsp; " + key_span("#000000", "&#9472; Actual (test)") + ..
+        "&nbsp;&nbsp; " + key_span("#d22828", "- - Predicted");
+    if show_ma then s = s + "&nbsp;&nbsp; " + key_span("#2850dc", "-.- 20-day MA"); end
+    s = s + "&nbsp;&nbsp; " + key_span("#e08a00", "&#9670; Next-day forecast") + "&nbsp;&nbsp; " + key_span("#555555", "&#124; train/test split") + "</html>";
+endfunction
+
+
+function draw_main_chart()
+    // Test window (actual vs predicted, 20-day MA) with equal-length training
+    // context, the train/test divider and the next-day forecast.
     global gui app_state
-    idx = get(gui.dataset_popup, "value");
-    if idx <= size(app_state.dataset_files, 2) then
-        path = app_state.dataset_files(idx);
-    else
-        path = app_state.custom_csv_path;
-    end
-    if path == "" then
-        set(gui.status_text, "string", "No custom CSV loaded yet -- use File > Load Custom CSV...");
+    ax = gui.ax_main;
+    if ~has(app_state.analysis) then
+        clear_axes(ax, gui.ph_main, "No analysis yet - click Run Analysis");
+        set(gui.key_main, "string", "");
+        set(gui.head_main, "string", " PRICE & PREDICTION");
         return
     end
+    r = app_state.analysis; d = app_state.data; n = d.n;
+    restore_axes(ax, gui.ph_main);
+    vis_lo = max(1, r.split_cal - r.n_test + 1);
+    hist_x = (vis_lo:r.split_cal)'; hist_y = d.close(vis_lo:r.split_cal);
+    vis_vals = [hist_y; r.y_true; r.y_pred; r.next_price];
+    pad = 0.08 * (max(vis_vals) - min(vis_vals) + 1e-9);
+    ylo = min(vis_vals) - pad; yhi = max(vis_vals) + pad;
+    labels = [];   // legend labels in creation order
 
+    plot(hist_x, hist_y); style_last([130 140 160], 2, 1);
+    labels = [labels, "Train"];
+    plot([r.split_cal + 0.5, r.split_cal + 0.5], [ylo, yhi]); style_last([90 90 90], 1, 3);
+    labels = [labels, "Split"];
+    plot(r.test_idx, r.y_true); style_last([0 0 0], 2, 1);
+    labels = [labels, "Actual"];
+    plot(r.test_idx, r.y_pred); style_last([210 40 40], 2, 2);
+    labels = [labels, "Predicted"];
+    if app_state.show_ma then
+        ma = moving_average(r.y_true, 20, r.ma_history);
+        plot(r.test_idx, ma); style_last([40 80 220], 2, 4);
+        labels = [labels, "20d MA"];
+    end
+    plot(n + 1, r.next_price, "d");
+    e = gce(); e.children(1).mark_background = color(255, 170, 0);
+    e.children(1).mark_foreground = color(120, 60, 0); e.children(1).mark_size = 8;
+    labels = [labels, "Next day"];
+
+    ax.data_bounds = [vis_lo, ylo; n + 4, yhi];
+    ax.tight_limits = "on";
+    set_date_ticks(ax, d.dates, vis_lo, n);
+    ax.margins = [0.08, 0.03, 0.04, 0.17];
+    ax.title.text = r.name + ": actual vs predicted (test window + equal training context)";
+    ax.title.font_size = 3;
+    ax.y_label.text = "Price"; ax.x_label.text = "Date (yy-mm-dd)";
+    set(gui.key_main, "string", main_key_html(app_state.show_ma));
+    set(gui.head_main, "string", " PRICE & PREDICTION -- " + r.name);
+endfunction
+
+
+function draw_comparison_chart()
+    // Grouped bars: single-split test RMSE and walk-forward mean RMSE.
+    global gui app_state
+    ax = gui.ax_cmp;
+    if ~has(app_state.cmp) then
+        clear_axes(ax, gui.ph_cmp, "No comparison yet - click Compare Models");
+        return
+    end
+    M = app_state.cmp.M; lab = app_state.cmp.labels;
+    restore_axes(ax, gui.ph_cmp);
+    vals = [M(:, 1), M(:, 6)];
+    bar(1:4, vals, 0.7, "grouped");
+    e = gce();
+    e.children(2).background = color(60, 120, 200);    // first series: test window
+    e.children(1).background = color(240, 150, 40);    // second series: walk-forward
+    ymax = max(vals) * 1.25;
+    ax.data_bounds = [0.4, 0; 4.6, ymax];
+    ax.tight_limits = "on";
+    ax.x_ticks = tlist(["ticks", "locations", "labels"], (1:4)', lab(:));
+    for i = 1:4
+        xstring(i - 0.33, vals(i, 1) + ymax * 0.015, msprintf("%.2f", vals(i, 1)));
+        t = gce(); t.font_size = 1;
+        xstring(i + 0.03, vals(i, 2) + ymax * 0.015, msprintf("%.2f", vals(i, 2)));
+        t = gce(); t.font_size = 1;
+    end
+    ax.margins = [0.12, 0.06, 0.04, 0.17];
+    ax.title.text = "RMSE by model (lower is better)"; ax.title.font_size = 3;
+    lg = legend(["Test window", "Walk-forward mean"], "in_upper_left"); lg.font_size = 2;
+    ax.y_label.text = "RMSE"; ax.x_label.text = "";
+endfunction
+
+
+function draw_equity_chart()
+    // Strategy vs buy & hold equity with BUY / SELL execution markers.
+    global gui app_state
+    ax = gui.ax_eq;
+    if ~has(app_state.bt) then
+        clear_axes(ax, gui.ph_eq, "No backtest yet - click Run Backtest");
+        return
+    end
+    bt = app_state.bt; r = app_state.analysis; d = app_state.data;
+    n = size(bt.strategy_value, 1);
+    restore_axes(ax, gui.ph_eq);
+    x = (1:n)';
+    plot(x, bt.buyhold_value); style_last([120 130 145], 2, 1);
+    plot(x, bt.strategy_value); style_last([20 110 60], 2, 1);
+    labels = ["Buy & hold", "StockVision strategy"];   // creation order
+    pos = bt.position; prev = [0; pos(1:$-1)];
+    buys = find(pos == 1 & prev == 0); sells = find(pos == 0 & prev == 1);
+    if ~isempty(buys) then
+        plot(buys, bt.strategy_value(buys), "^");
+        e = gce(); e.children(1).mark_background = color(30, 170, 60); e.children(1).mark_foreground = color(0, 90, 20);
+        e.children(1).mark_size = 7; labels = [labels, "BUY executed"];
+    end
+    if ~isempty(sells) then
+        plot(sells, bt.strategy_value(sells), "v");
+        e = gce(); e.children(1).mark_background = color(220, 50, 50); e.children(1).mark_foreground = color(120, 0, 0);
+        e.children(1).mark_size = 7; labels = [labels, "SELL executed"];
+    end
+    allv = [bt.strategy_value; bt.buyhold_value];
+    pad = 0.08 * (max(allv) - min(allv) + 1e-9);
+    ax.data_bounds = [1, min(allv) - pad; n, max(allv) + pad];
+    ax.tight_limits = "on";
+    set_date_ticks(ax, d.dates(r.test_idx), 1, n);
+    ax.title.text = "Portfolio value on the test window (same period for both)"; ax.title.font_size = 3;
+    ax.y_label.text = "Value"; ax.x_label.text = "";
+    lg = legend(labels, "in_lower_right"); lg.font_size = 2;
+    ax.margins = [0.17, 0.06, 0.04, 0.17];
+endfunction
+
+
+// ---------------------------------------------------------------------------
+// Text panels
+// ---------------------------------------------------------------------------
+function a = current_assumptions()
+    // Assumptions for the info panel; falls back to defaults when an edit
+    // box is invalid so the panel never goes blank.
+    global app_state
+    [ok, p, msg] = read_params();
+    if ~ok then
+        p = struct("buy", 0.5, "sell", -0.5, "capital", 100000, "cost", 0, "slip", 0);
+    end
+    cfg = struct("capital", p.capital, "cost", p.cost, "slip", p.slip, "buy", p.buy, ..
+                 "sell", p.sell, "split_ratio", app_state.split_ratio);
+    a = assumptions_struct(app_state.data, app_state.dq, cfg);
+endfunction
+
+
+function show_info_tab(name)
+    // Top-right panel shows either the data-quality block or the assumptions.
+    global gui app_state
+    app_state.info_tab = name;
+    if name == "asm" then
+        set_list(gui.lb_info, app_state.info_asm);
+        set(gui.tab_asm, "fontweight", "bold"); set(gui.tab_dq, "fontweight", "normal");
+    else
+        set_list(gui.lb_info, app_state.info_dq);
+        set(gui.tab_dq, "fontweight", "bold"); set(gui.tab_asm, "fontweight", "normal");
+    end
+endfunction
+
+
+function refresh_dq()
+    global gui app_state
+    if ~has(app_state.data) then
+        app_state.info_dq = ["No dataset loaded."];
+    else
+        app_state.dq = data_quality_summary(app_state.data, app_state.split_ratio);
+        app_state.info_dq = format_data_quality(app_state.dq, dataset_label());
+    end
+    if app_state.info_tab == "dq" then show_info_tab("dq"); end
+endfunction
+
+
+function s = dataset_label()
+    global app_state
+    if app_state.dataset_idx <= size(app_state.dataset_labels, 2) then
+        s = app_state.dataset_labels(app_state.dataset_idx);
+    else
+        s = "Custom: " + app_state.custom_path;
+    end
+endfunction
+
+
+function refresh_assumptions()
+    global gui app_state
+    if ~has(app_state.data) then return; end
+    app_state.info_asm = format_assumptions(current_assumptions());
+    if app_state.info_tab == "asm" then show_info_tab("asm"); end
+endfunction
+
+
+function refresh_results()
+    global gui app_state
+    if ~has(app_state.analysis) then
+        set_list(gui.lb_res, ["No analysis yet.", " ", "1. Pick a dataset and model.", "2. Click Run Analysis."]);
+        return
+    end
+    sig = app_state.signal;
+    set_list(gui.lb_res, format_model_results(app_state.analysis, app_state.naive, sig, has(app_state.cmp)));
+endfunction
+
+
+function refresh_comparison()
+    global gui app_state
+    if ~has(app_state.cmp) then
+        set_list(gui.lb_cmp, ["No comparison yet.", " ", "Click Compare Models to evaluate Naive, LR, AR and ES", ..
+                              "on the same data, split and test window."]);
+        set_list(gui.lb_wf, ["No walk-forward validation yet.", " ", "Click Walk Forward Validation (or Compare Models)."]);
+    else
+        c = app_state.cmp;
+        set_list(gui.lb_cmp, [format_comparison(c); " "; format_ranking(c)]);
+        set_list(gui.lb_wf, format_walk_forward(c.wf));
+    end
+endfunction
+
+
+function refresh_backtest()
+    global gui app_state
+    if ~has(app_state.bt) then
+        set_list(gui.lb_bt, ["No backtest yet.", " ", "Run Analysis first, then click Run Backtest."]);
+        set(gui.strip, "string", "  Backtest summary: not run yet");
+    else
+        set_list(gui.lb_bt, format_backtest(app_state.bt, app_state.analysis.name));
+        set(gui.strip, "string", "  " + format_backtest_headline(app_state.bt));
+    end
+endfunction
+
+
+function refresh_all()
+    global gui
+    refresh_dq(); refresh_assumptions(); refresh_results(); refresh_comparison(); refresh_backtest();
+    gui.fig.immediate_drawing = "off";
+    draw_main_chart(); draw_comparison_chart(); draw_equity_chart();
+    gui.fig.immediate_drawing = "on";
+    set_button_states();
+endfunction
+
+
+// ---------------------------------------------------------------------------
+// State changes and actions
+// ---------------------------------------------------------------------------
+function ok = load_current_dataset()
+    // Loads the selected CSV into app_state; shows a clear error otherwise.
+    global gui app_state
+    ok = %f;
+    if app_state.dataset_idx <= size(app_state.dataset_files, 2) then
+        path = app_state.dataset_files(app_state.dataset_idx);
+    else
+        path = app_state.custom_path;
+    end
+    set_status("Loading dataset...");
     try
         d = load_dataset(path);
     catch
-        messagebox(lasterror(), "Could not load CSV", "error");
-        set(gui.status_text, "string", "Failed to load dataset -- see popup for details.");
+        msg = lasterror();
+        app_state.data = []; app_state.dq = [];
+        set_status("Could not load dataset (see message).", "error");
+        show_dialog("Dataset error", msg, "error");
         return
     end
-
+    set_status("Validating data...");
     app_state.data = d;
-    invalidate_model();
-    msg = "Loaded " + string(d.n) + " rows. Click Run Analysis.";
+    app_state.dq = data_quality_summary(d, app_state.split_ratio);
+    ok = %t;
     if size(d.warnings, 1) > 0 then
-        msg = msg + " Note: " + strcat(d.warnings, " ");
+        set_status("Loaded with warnings: " + strcat(d.warnings, " "), "info");
     end
-    set(gui.status_text, "string", msg);
 endfunction
 
 
-// ---------------------------------------------------------------------------
-// Callback: model picker popup changed. A single 3-item popupmenu (rather
-// than one radiobutton per model) so a fourth or fifth model could be
-// added later without another round of manual layout surgery.
-// ---------------------------------------------------------------------------
+function invalidate(level, why)
+    // Drops results that no longer match the settings, so stale numbers can
+    // never stay on screen. level: "all", "model", "cmp", "bt".
+    global app_state
+    select level
+    case "all" then
+        app_state.analysis = []; app_state.naive = []; app_state.signal = [];
+        app_state.cmp = []; app_state.bt = [];
+    case "model" then
+        app_state.analysis = []; app_state.naive = []; app_state.signal = []; app_state.bt = [];
+    case "cmp" then
+        app_state.cmp = [];
+    case "bt" then
+        app_state.bt = [];
+    end
+    refresh_all();
+    if argn(2) >= 2 then set_status(why, "info"); end
+endfunction
+
+
+function on_dataset_changed()
+    global gui app_state
+    app_state.dataset_idx = get(gui.dataset_popup, "value");
+    if load_current_dataset() then
+        invalidate("all", "Dataset changed -- previous results cleared. Click Run Analysis.");
+    else
+        invalidate("all");
+    end
+endfunction
+
+
 function on_model_changed()
     global gui app_state
     idx = get(gui.model_popup, "value");
-    if idx == 1 then
-        app_state.model_type = "LR";
-    elseif idx == 2 then
-        app_state.model_type = "AR";
-    else
-        app_state.model_type = "ES";
-    end
+    keys = ["LR", "AR", "ES"];
+    app_state.model_type = keys(idx);
+    invalidate("model", "Model changed -- click Run Analysis.");
 endfunction
 
 
-// ---------------------------------------------------------------------------
-// Callback: slider moved -> update the live readout label AND invalidate
-// whatever model was previously fit (it was fit to the OLD split, and
-// silently backtesting/exporting it after the slider moved would be
-// misleading).
-// ---------------------------------------------------------------------------
 function on_slider_moved()
     global gui app_state
-    v = get(gui.split_slider, "value");
+    v = round(get(gui.split_slider, "value") * 100) / 100;
+    if abs(v - app_state.split_ratio) < 1e-9 then return; end
     app_state.split_ratio = v;
-    set(gui.split_label, "string", "Train/Test split: " + string(round(v*100)) + "% / " + ..
-        string(round((1-v)*100)) + "%");
-    invalidate_model();
-    set(gui.status_text, "string", "Split changed -- click Run Analysis to refit.");
-endfunction
-
-
-// ---------------------------------------------------------------------------
-// Callback: moving-average checkbox toggled -> redraw immediately using the
-// already-computed fit, instead of requiring another Run Analysis click.
-// ---------------------------------------------------------------------------
-function on_ma_toggle()
-    global app_state
-    if typeof(app_state.last_plot) == "constant" then
-        return   // nothing has been plotted yet -- nothing to redraw
+    set(gui.split_label, "string", "Train/test split: " + string(round(v*100)) + "% / " + string(round((1-v)*100)) + "%");
+    if has(app_state.data) then
+        invalidate("all", "Split changed -- previous results cleared. Click Run Analysis.");
     end
-    redraw_chart();
 endfunction
 
 
-// ---------------------------------------------------------------------------
-// Callback: "Run Analysis" button -- the main action. Fits the selected
-// model, evaluates it, draws the chart, and updates the results panel.
-// ---------------------------------------------------------------------------
+function on_ma_toggled()
+    global gui app_state
+    app_state.show_ma = (get(gui.cb_ma, "value") == 1);
+    draw_main_chart();
+endfunction
+
+
+function on_model_params_changed()
+    // AR lookback or fold count edited.
+    global gui app_state
+    [ok, lb, nf, msg] = read_model_params();
+    if ~ok then set_status(msg, "error"); return; end
+    if lb <> app_state.ar_lookback then
+        app_state.ar_lookback = lb; app_state.n_folds = nf;
+        invalidate("all", "AR lookback changed -- previous results cleared.");
+    elseif nf <> app_state.n_folds then
+        app_state.n_folds = nf;
+        invalidate("cmp", "Fold count changed -- comparison cleared. Click Compare Models.");
+    end
+endfunction
+
+
+function on_strategy_changed()
+    // Thresholds, capital, costs or slippage edited.
+    global gui app_state
+    [ok, p, msg] = read_params();
+    if ~ok then set_status(msg, "error"); return; end
+    refresh_assumptions();
+    if has(app_state.analysis) then
+        r = app_state.analysis;
+        app_state.signal = make_signal(r, p);
+        refresh_results();
+    end
+    if has(app_state.bt) then
+        invalidate("bt", "Strategy settings changed -- backtest cleared. Click Run Backtest.");
+    else
+        set_status("Strategy settings updated.", "info");
+    end
+endfunction
+
+
+function sig = make_signal(r, p)
+    global app_state
+    cur = app_state.data.close($);
+    sig = generate_signal(cur, r.next_price, p.buy, p.sell);
+    sig.current_price = cur; sig.buy_thr = p.buy; sig.sell_thr = p.sell;
+endfunction
+
+
 function on_run_analysis()
-    global gui app_state
-
-    if typeof(app_state.data) == "constant" then   // still the placeholder []
-        set(gui.status_text, "string", "Pick a dataset first.");
-        return
-    end
-
-    set(gui.status_text, "string", "Running...");
-
-    app_state.buy_threshold = read_numeric_edit(gui.buy_threshold_edit, 0.5);
-    app_state.sell_threshold = read_numeric_edit(gui.sell_threshold_edit, -0.5);
-    lb = round(read_numeric_edit(gui.ar_lookback_edit, 10));
-    if lb < 2 then lb = 2; end
-    set(gui.ar_lookback_edit, "string", string(lb));
-    app_state.ar_lookback = lb;
-    app_state.transaction_cost_pct = read_numeric_edit(gui.txn_cost_edit, 0);
-    app_state.slippage_pct = read_numeric_edit(gui.slippage_edit, 0);
-
-    data = app_state.data;
-    current_price = data.close($);
-
+    global gui app_state ES_ALPHA ES_BETA
+    if ~has(app_state.data) then set_status("Load a dataset first.", "error"); return; end
+    [ok, lb, nf, msg] = read_model_params();
+    if ~ok then set_status(msg, "error"); return; end
+    [ok2, p, msg2] = read_params();
+    if ~ok2 then set_status(msg2, "error"); return; end
+    app_state.ar_lookback = lb; app_state.n_folds = nf;
+    set_status("Validating data...");
+    split_cal = round(app_state.data.n * app_state.split_ratio);
     try
-        if app_state.model_type == "LR" then
-            feat = build_lr_features(data);
-            model = fit_linear_regression(feat, app_state.split_ratio);
-            ev = evaluate_model(model);
-            [next_price, ci_lo, ci_hi] = predict_next_lr(model);
-            y_test_plot = model.y_test;
-            y_pred_plot = ev.y_pred;
-            ma_history = feat.y(1:model.split_idx);
-            model_name = "Linear Regression";
-        elseif app_state.model_type == "AR" then
-            model = fit_ar_model(data, app_state.ar_lookback, app_state.split_ratio);
-            ev = evaluate_ar_model(model);
-            [next_price, ci_lo, ci_hi] = predict_next_ar(model);
-            y_test_plot = ev.y_test_real;
-            y_pred_plot = ev.y_pred;
-            ma_history = model.y_train_real;
-            model_name = "AR(" + string(app_state.ar_lookback) + ")";
-        else   // "ES" -- Exponential Smoothing (Holt's linear trend)
-            model = fit_exponential_smoothing(data, app_state.split_ratio, ES_ALPHA, ES_BETA);
-            ev = evaluate_es_model(model);
-            [next_price, ci_lo, ci_hi] = predict_next_es(model);
-            y_test_plot = model.y_test;
-            y_pred_plot = ev.y_pred;
-            ma_history = data.close(1:model.split_idx);
-            model_name = "Exp. Smoothing (a=" + string(ES_ALPHA) + ", b=" + string(ES_BETA) + ")";
-        end
+        set_status("Training " + model_display_name(app_state.model_type) + "...");
+        r = run_model(app_state.data, app_state.model_type, split_cal, lb, ES_ALPHA, ES_BETA);
+        set_status("Evaluating naive baseline on the same test window...");
+        nv = run_model(app_state.data, "NAIVE", split_cal, lb, ES_ALPHA, ES_BETA);
     catch
-        messagebox(lasterror(), "Analysis failed", "error");
-        set(gui.status_text, "string", "Analysis failed -- see popup for details.");
+        err = lasterror();
+        set_status("Analysis failed: " + err, "error");
+        show_dialog("Analysis error", err, "error");
         return
     end
-
-    signal = generate_signal(current_price, next_price, app_state.buy_threshold, app_state.sell_threshold);
-    app_state.model = model;
-    app_state.last_fitted_model_type = app_state.model_type;
-
-    app_state.last_plot = struct();
-    app_state.last_plot.y_test_plot = y_test_plot;
-    app_state.last_plot.y_pred_plot = y_pred_plot;
-    app_state.last_plot.model_name = model_name;
-    app_state.last_plot.ma_history = ma_history;
-    redraw_chart();
-
-    // Canonical snapshot of the last analysis -- used both to build the
-    // results panel below AND by on_export_results(), so the exported file
-    // (CSV/PDF/TXT) always matches exactly what's on screen.
-    ds_idx = get(gui.dataset_popup, "value");
-    if ds_idx <= size(app_state.dataset_labels, 2) then
-        dataset_label = app_state.dataset_labels(ds_idx);
-    else
-        dataset_label = "Custom: " + app_state.custom_csv_path;
-    end
-
-    lr = struct();
-    lr.dataset_label = dataset_label;
-    lr.model_name = model_name; lr.rows_used = data.n; lr.split_ratio = app_state.split_ratio;
-    lr.rmse = ev.rmse; lr.mae = ev.mae; lr.mape = ev.mape; lr.r2 = ev.r2;
-    lr.accuracy_pct = ev.accuracy_pct;
-    lr.current_price = current_price; lr.next_price = next_price;
-    lr.ci_lo = ci_lo; lr.ci_hi = ci_hi;
-    lr.pct_change = signal.pct_change; lr.signal_action = signal.action;
-    lr.buy_threshold = app_state.buy_threshold; lr.sell_threshold = app_state.sell_threshold;
-    app_state.last_results = lr;
-
-    accuracy_str = "n/a";
-    if ~isnan(ev.accuracy_pct) then accuracy_str = string(ev.accuracy_pct) + "%"; end
-
-    // --- results panel ---
-    results_str = [
-        "Dataset: " + dataset_label; ..
-        "Model: " + model_name; ..
-        "Rows used: " + string(data.n); ..
-        "Train/test split: " + string(round(app_state.split_ratio*100)) + "% / " + ..
-            string(round((1-app_state.split_ratio)*100)) + "%"; ..
-        "-----------------------------"; ..
-        "RMSE: " + string(ev.rmse); ..
-        "MAE:  " + string(ev.mae); ..
-        "MAPE: " + string(ev.mape) + "%"; ..
-        "R^2:  " + string(ev.r2); ..
-        "Prediction Accuracy: " + accuracy_str; ..
-        "-----------------------------"; ..
-        "Current price:   " + string(current_price); ..
-        "Predicted price: " + string(next_price); ..
-        "  (+/-95% band: " + string(ci_lo) + " to " + string(ci_hi) + ..
-            " -- a rough normal approximation from residual spread,"; ..
-        "   NOT a true statistical prediction interval)"; ..
-        "Predicted change: " + string(signal.pct_change) + "%"; ..
-        "SIGNAL: " + signal.action + "  (thresholds +" + string(app_state.buy_threshold) + ..
-            "% / " + string(app_state.sell_threshold) + "%)"; ..
-        "(SELL exits an existing position -- this app never shorts.)"; ..
-        "[Informational only -- no real orders are placed.]" ..
-    ];
-    set(gui.results_text, "string", results_str);
-    set(gui.status_text, "string", "Done.");
-
-    // Colored BUY/SELL/HOLD indicator, right next to the "Results" label --
-    // the same information is already in the results_str text above, but a
-    // color-coded glance is much faster to read than scanning the listbox.
-    if signal.action == "BUY" then
-        set(gui.label_signal_indicator, "string", "BUY", "foregroundcolor", [0 0.55 0]);
-    elseif signal.action == "SELL" then
-        set(gui.label_signal_indicator, "string", "SELL", "foregroundcolor", [0.8 0 0]);
-    else
-        set(gui.label_signal_indicator, "string", "HOLD", "foregroundcolor", [0.45 0.45 0.45]);
-    end
+    app_state.analysis = r; app_state.naive = nv; app_state.bt = [];
+    app_state.signal = make_signal(r, p);
+    set_status("Updating dashboard...");
+    refresh_all();
+    set_status("Analysis complete.", "ok");
 endfunction
 
 
-// ---------------------------------------------------------------------------
-// Callback: "Model Info" button -- educational popup explaining the model
-// currently selected. This is what ties the app to "educational usefulness"
-// rather than just being a black-box predictor.
-// ---------------------------------------------------------------------------
-function on_model_info()
+function ensure_comparison()
+    // Runs all models + walk-forward on the common window if needed.
+    global gui app_state ES_ALPHA ES_BETA
+    [ok, lb, nf, msg] = read_model_params();
+    if ~ok then error(msg); end
+    app_state.ar_lookback = lb; app_state.n_folds = nf;
+    set_status("Training Naive, Linear Regression, AR and Exponential Smoothing...");
+    set_status("Running walk-forward validation...");
+    app_state.cmp = compare_models(app_state.data, app_state.split_ratio, lb, ES_ALPHA, ES_BETA, nf);
+endfunction
+
+
+function adopt_selected_model_from_comparison()
+    // When Compare runs first, the chart/results panels still show the selected model.
     global app_state
-    messagebox(MODEL_INFO_TEXT(app_state.model_type), "About this model", "info");
+    [ok, p, msg] = read_params();
+    if ~ok then return; end
+    kmap = ["LR", "AR", "ES"];
+    k = find(kmap == app_state.model_type) + 1;
+    app_state.analysis = app_state.cmp.results(k);
+    app_state.naive = app_state.cmp.results(1);
+    app_state.signal = make_signal(app_state.analysis, p);
 endfunction
 
 
-// ---------------------------------------------------------------------------
-// Callback: "Reset" button -- clears results and chart, back to a blank
-// slate, including the threshold/lookback/cost edit boxes.
-// ---------------------------------------------------------------------------
-function on_reset()
+function on_compare()
     global gui app_state
-    global CHART_FIGURE_ID BACKTEST_FIGURE_ID COMPARE_FIGURE_ID
-    // Clears the three dedicated CHART windows -- never gui.fig (the main window), which
-    // holds every uicontrol in the app and must never be scf/clf'd.
-    scf(CHART_FIGURE_ID);
-    clf(CHART_FIGURE_ID);
-    scf(BACKTEST_FIGURE_ID);
-    clf(BACKTEST_FIGURE_ID);
-    scf(COMPARE_FIGURE_ID);
-    clf(COMPARE_FIGURE_ID);
-    invalidate_model();
-    app_state.last_backtest = [];
-    set(gui.buy_threshold_edit, "string", "0.5");
-    set(gui.sell_threshold_edit, "string", "-0.5");
-    set(gui.ar_lookback_edit, "string", "10");
-    set(gui.txn_cost_edit, "string", "0");
-    set(gui.slippage_edit, "string", "0");
-    app_state.buy_threshold = 0.5; app_state.sell_threshold = -0.5; app_state.ar_lookback = 10;
-    app_state.transaction_cost_pct = 0; app_state.slippage_pct = 0;
-    set(gui.label_signal_indicator, "string", "");
-    set(gui.results_text, "string", "Run an analysis to see results here.");
-    set(gui.status_text, "string", "Reset. Pick a dataset and click Run Analysis.");
+    if ~has(app_state.data) then set_status("Load a dataset first.", "error"); return; end
+    try
+        ensure_comparison();
+    catch
+        err = lasterror();
+        set_status("Comparison failed: " + err, "error");
+        show_dialog("Comparison error", err, "error");
+        return
+    end
+    if ~has(app_state.analysis) then adopt_selected_model_from_comparison(); end
+    set_status("Updating dashboard...");
+    refresh_all();
+    rk = app_state.cmp.rank;
+    msg = "Comparison complete. Best StockVision model: " + app_state.cmp.labels(rk.best_idx);
+    if rk.naive_rank_pos == 1 then msg = msg + " (naive baseline ranks first overall)"; end
+    set_status(msg + ".", "ok");
 endfunction
 
 
-// ---------------------------------------------------------------------------
-// Callback: "Run Backtest" button. Uses whichever model was fit by the most
-// recent "Run Analysis" click and simulates following its BUY/SELL/HOLD
-// signal through the entire test period (one-day signal-to-trade lag,
-// optional transaction cost/slippage from the Thresholds & Costs panel),
-// plotted against a buy-and-hold baseline in a dedicated second window
-// (kept as a pure plot window with no uicontrols on it at all, to avoid any
-// layout risk in the main window).
-//
-// Deliberately uses app_state.last_fitted_model_type -- a snapshot taken at
-// fit time -- rather than the live app_state.model_type popup selection,
-// so that changing the model picker AFTER running analysis but
-// BEFORE clicking Run Backtest can't cause a mismatch between which model
-// is actually stored in app_state.model and which one this function thinks
-// it is reading.
-// ---------------------------------------------------------------------------
+function on_walk_forward()
+    global gui app_state
+    if ~has(app_state.data) then set_status("Load a dataset first.", "error"); return; end
+    try
+        ensure_comparison();
+    catch
+        err = lasterror();
+        set_status("Walk-forward failed: " + err, "error");
+        show_dialog("Walk-forward error", err, "error");
+        return
+    end
+    if ~has(app_state.analysis) then adopt_selected_model_from_comparison(); end
+    refresh_all();
+    wf = app_state.cmp.wf;
+    msg = "Walk-forward validation complete: " + string(wf.n_used) + " fold(s)";
+    if wf.reason <> "" then msg = msg + " -- " + wf.reason; end
+    set_status(msg, "ok");
+endfunction
+
+
 function on_run_backtest()
     global gui app_state
-    global BACKTEST_FIGURE_ID
-
-    if typeof(app_state.model) == "constant" then
-        set(gui.status_text, "string", "Run an analysis first, then click Run Backtest.");
+    if ~has(app_state.analysis) then set_status("Run Analysis first.", "error"); return; end
+    [ok, p, msg] = read_params();
+    if ~ok then set_status(msg, "error"); return; end
+    set_status("Running backtest...");
+    r = app_state.analysis;
+    try
+        app_state.bt = run_backtest(r.y_true, r.y_pred, p.buy, p.sell, p.capital, p.cost, p.slip);
+    catch
+        err = lasterror();
+        set_status("Backtest failed: " + err, "error");
+        show_dialog("Backtest error", err, "error");
         return
     end
-
-    model = app_state.model;
-    starting_capital = 100000;
-
-    try
-        if app_state.last_fitted_model_type == "LR" then
-            ev = evaluate_model(model);
-            y_actual = model.y_test; y_pred = ev.y_pred;
-        elseif app_state.last_fitted_model_type == "AR" then
-            ev = evaluate_ar_model(model);
-            y_actual = ev.y_test_real; y_pred = ev.y_pred;
-        else   // "ES"
-            ev = evaluate_es_model(model);
-            y_actual = model.y_test; y_pred = ev.y_pred;
-        end
-        bt = run_backtest(y_actual, y_pred, app_state.buy_threshold, app_state.sell_threshold, ..
-                           starting_capital, app_state.transaction_cost_pct, app_state.slippage_pct);
-    catch
-        messagebox(lasterror(), "Backtest failed", "error");
-        set(gui.status_text, "string", "Backtest failed -- see popup for details.");
-        return
-    end
-
-    app_state.last_backtest = bt;
-
-    // Dedicated backtest figure -- never gui.fig (the main window).
-    scf(BACKTEST_FIGURE_ID);
-    clf(BACKTEST_FIGURE_ID);
-    plot(1:size(bt.strategy_value,1), bt.strategy_value, "b-");
-    plot(1:size(bt.buyhold_value,1), bt.buyhold_value, "k--");
-    legend(["Model-Guided Strategy", "Buy & Hold"], 2);
-    xtitle("Backtest -- Strategy: " + string(round(bt.strategy_final)) + ..
-           " (" + string(round(bt.strategy_return_pct)) + "%)   vs   Buy & Hold: " + ..
-           string(round(bt.buyhold_final)) + " (" + string(round(bt.buyhold_return_pct)) + "%)", ..
-           "Test set day", "Portfolio value (starting capital: " + string(starting_capital) + ")");
-    // Same visual polish as the analysis chart -- gridlines + thicker
-    // lines -- defensively wrapped for the same reason (see redraw_chart()).
-    try
-        ax_bt = gca();
-        ax_bt.grid = [color("light gray") color("light gray")];
-        for k = 1:size(ax_bt.children)
-            if typeof(ax_bt.children(k)) == "Compound" then
-                for c = 1:size(ax_bt.children(k).children)
-                    ax_bt.children(k).children(c).thickness = 2;
-                end
-            end
-        end
-    catch
-    end
-
-    sharpe_str = "n/a"; if ~isnan(bt.sharpe_ratio) then sharpe_str = string(bt.sharpe_ratio); end
-    winrate_str = "n/a"; if ~isnan(bt.win_rate_pct) then winrate_str = string(bt.win_rate_pct) + "%"; end
-
-    summary = [
-        "BACKTEST RESULTS"; " "; ..
-        "Starting capital: " + string(starting_capital); ..
-        "Trades made: " + string(bt.n_trades) + "  (" + string(bt.n_completed_trades) + ..
-            " completed round-trip(s))"; ..
-        "Transaction cost: " + string(bt.transaction_cost_pct) + "%   Slippage: " + ..
-            string(bt.slippage_pct) + "%"; " "; ..
-        "Strategy final value:   " + string(bt.strategy_final); ..
-        "Strategy total return:  " + string(bt.strategy_return_pct) + "%"; " "; ..
-        "Buy & Hold final value: " + string(bt.buyhold_final); ..
-        "Buy & Hold total return: " + string(bt.buyhold_return_pct) + "%"; " "; ..
-        "--- Risk ---"; ..
-        "Max drawdown: " + string(bt.max_drawdown_pct) + "%"; ..
-        "Annualized volatility: " + string(bt.volatility_pct_annualized) + "%"; ..
-        "Sharpe ratio (rf=0): " + sharpe_str; ..
-        "Win rate (completed trades): " + winrate_str; " "; ..
-        "[Historical backtest only -- not a guarantee of future performance."; ..
-        " Signals take effect one day after they fire (no look-ahead)."; ..
-        " SELL exits a position -- this app never shorts.]" ..
-    ];
-    // Shown in-panel (not a blocking popup) so the person can keep the chart
-    // window and this summary both visible side by side, and so a Backtest
-    // click doesn't interrupt whatever else they're doing in the window.
-    set(gui.results_text, "string", summary);
-    set(gui.status_text, "string", "Backtest complete -- see the new chart window and the Results panel.");
+    set_status("Updating dashboard...");
+    refresh_all();
+    show_info_tab("asm");
+    set_status("Backtest complete.", "ok");
 endfunction
 
 
-// ---------------------------------------------------------------------------
-// Callback: "Compare Models" button -- fits BOTH models on the current
-// dataset/split so they can be judged side by side (single-split metrics
-// plus a 3-fold walk-forward mean), instead of having to switch the radio
-// button back and forth and remember numbers.
-// ---------------------------------------------------------------------------
-function on_compare_models()
+function rep = build_rep()
+    // Everything an export needs, taken from the current dashboard state.
+    global app_state ES_ALPHA ES_BETA
+    [ok, p, msg] = read_params();
+    cfg = struct("split_ratio", app_state.split_ratio, "ar_lookback", app_state.ar_lookback, ..
+                 "es_alpha", ES_ALPHA, "es_beta", ES_BETA, "n_folds", app_state.n_folds, ..
+                 "buy", p.buy, "sell", p.sell, "cost", p.cost, "slip", p.slip, "capital", p.capital);
+    rep = struct("dataset_label", dataset_label(), "data", app_state.data, "dq", app_state.dq, ..
+                 "cfg", cfg, "analysis", app_state.analysis, "naive", app_state.naive, ..
+                 "signal", app_state.signal, "validated", has(app_state.cmp), ..
+                 "cmp", app_state.cmp, "bt", app_state.bt, "assump", current_assumptions());
+endfunction
+
+
+function msg = export_to(path)
+    global APP_DIR
+    // Writes .txt (full report + companion CSVs), .csv (single table) or
+    // .pdf (the dashboard charts). Never overwrites: a free name is chosen.
     global gui app_state
-    global COMPARE_FIGURE_ID ES_ALPHA ES_BETA
-
-    if typeof(app_state.data) == "constant" then
-        set(gui.status_text, "string", "Pick a dataset first.");
-        return
-    end
-
-    data = app_state.data;
-    lb = round(read_numeric_edit(gui.ar_lookback_edit, 10));
-    if lb < 2 then lb = 2; end
-    n_folds = 3;
-
-    try
-        feat = build_lr_features(data);
-        lr_model = fit_linear_regression(feat, app_state.split_ratio);
-        lr_eval = evaluate_model(lr_model);
-
-        ar_model = fit_ar_model(data, lb, app_state.split_ratio);
-        ar_eval = evaluate_ar_model(ar_model);
-
-        es_model = fit_exponential_smoothing(data, app_state.split_ratio, ES_ALPHA, ES_BETA);
-        es_eval = evaluate_es_model(es_model);
-
-        wf_lr = walk_forward_validate(data, "LR", n_folds, lb);
-        wf_ar = walk_forward_validate(data, "AR", n_folds, lb);
-        wf_es = walk_forward_validate_es(data, n_folds, ES_ALPHA, ES_BETA);
-    catch
-        messagebox(lasterror(), "Comparison failed", "error");
-        set(gui.status_text, "string", "Comparison failed -- see popup for details.");
-        return
-    end
-
-    // --- bar chart: single-split RMSE side by side with the more
-    // trustworthy walk-forward mean RMSE, in a dedicated window so it never
-    // has to fight the main window's uicontrols for space. ---
-    scf(COMPARE_FIGURE_ID);
-    clf(COMPARE_FIGURE_ID);
-    model_labels = ["LR"; "AR(" + string(lb) + ")"; "ES"];
-
-    subplot(1, 2, 1);
-    bar([lr_eval.rmse; ar_eval.rmse; es_eval.rmse]);
-    ax1 = gca();
-    // Custom category labels on the x-axis -- wrapped defensively: if this
-    // exact tlist form isn't accepted on some Scilab build, the chart still
-    // renders correctly with plain numeric x-ticks (1,2,3), just without the
-    // "LR/AR/ES" labels -- graceful degradation rather than a broken Compare
-    // button over a cosmetic detail.
-    try
-        ax1.x_ticks = tlist(["ticks", "locations", "labels"], [1;2;3], model_labels);
-    catch
-    end
-    ax1.grid = [color("light gray") color("light gray")];
-    xtitle("Single-Split RMSE (lower is better)", "Model", "RMSE");
-
-    subplot(1, 2, 2);
-    bar([wf_lr.mean_rmse; wf_ar.mean_rmse; wf_es.mean_rmse]);
-    ax2 = gca();
-    try
-        ax2.x_ticks = tlist(["ticks", "locations", "labels"], [1;2;3], model_labels);
-    catch
-    end
-    ax2.grid = [color("light gray") color("light gray")];
-    xtitle(string(n_folds) + "-Fold Walk-Forward Mean RMSE (lower, more trustworthy)", "Model", "RMSE");
-
-    summary = [
-        "MODEL COMPARISON"; ..
-        "Current split: " + string(round(app_state.split_ratio*100)) + "% / " + ..
-            string(round((1-app_state.split_ratio)*100)) + "%"; " "; ..
-        "Linear Regression:"; ..
-        "  RMSE=" + string(lr_eval.rmse) + "   MAE=" + string(lr_eval.mae) + ..
-        "   MAPE=" + string(lr_eval.mape) + "%   R^2=" + string(lr_eval.r2); ..
-        "  " + string(n_folds) + "-fold walk-forward: mean RMSE=" + string(wf_lr.mean_rmse) + ..
-            "   mean R^2=" + string(wf_lr.mean_r2); " "; ..
-        "AR(" + string(lb) + "):"; ..
-        "  RMSE=" + string(ar_eval.rmse) + "   MAE=" + string(ar_eval.mae) + ..
-        "   MAPE=" + string(ar_eval.mape) + "%   R^2=" + string(ar_eval.r2); ..
-        "  " + string(n_folds) + "-fold walk-forward: mean RMSE=" + string(wf_ar.mean_rmse) + ..
-            "   mean R^2=" + string(wf_ar.mean_r2); " "; ..
-        "Exponential Smoothing (a=" + string(ES_ALPHA) + ", b=" + string(ES_BETA) + "):"; ..
-        "  RMSE=" + string(es_eval.rmse) + "   MAE=" + string(es_eval.mae) + ..
-        "   MAPE=" + string(es_eval.mape) + "%   R^2=" + string(es_eval.r2); ..
-        "  " + string(n_folds) + "-fold walk-forward: mean RMSE=" + string(wf_es.mean_rmse) + ..
-            "   mean R^2=" + string(wf_es.mean_r2); " "; ..
-        "[Lower RMSE/MAE/MAPE is better. R^2 closer to 1 is better. The"; ..
-        " walk-forward numbers are the more trustworthy comparison --"; ..
-        " they average over several sequential train/test folds instead"; ..
-        " of relying on just one chronological split. See the chart window"; ..
-        " for the same numbers side by side.]" ..
-    ];
-    // In-panel, not a blocking popup -- see the same rationale in
-    // on_run_backtest() just above.
-    set(gui.results_text, "string", summary);
-    set(gui.status_text, "string", "Comparison complete -- see the chart window and the Results panel.");
-endfunction
-
-
-// ---------------------------------------------------------------------------
-// Export helpers -- three formats, one canonical data source
-// (app_state.last_results / app_state.last_plot / app_state.last_backtest),
-// so whichever format the user picks always matches what's on screen.
-//
-// Robustness fix (this revision): a real run on Scilab 2026.1.0 hit
-// "inconsistent row/column dimensions" on CSV export. Root cause: both
-// export_results_txt() and export_results_csv() built their output with a
-// single big literal vertical concatenation, e.g.
-//     lines = [lines; " "; "--- Last Backtest ---"; "Foo: " + string(x); ...]
-// This is only ever safe if EVERY piece being stacked is guaranteed to be a
-// scalar (1x1) string. Almost all of them are -- but nothing in the code
-// actually enforced that, so if any single piece (get(gui.results_text,
-// "string") returning multiple rows on some Scilab builds; string() applied
-// to a value that isn't a plain scalar; a plot-data field that ends up as a
-// row vector instead of a column vector) ever came back with more than one
-// row/column, that one non-conforming piece breaks the entire vertical
-// concatenation with exactly this error. This was hard to reproduce headlessly
-// (100+ real runs here across both models, all 3 datasets, with/without
-// backtest, and several splits/costs never hit it -- consistent with it
-// depending on a runtime/widget-shape detail that only shows up on certain
-// Scilab builds), so the fix does not chase one specific value -- it makes
-// the construction structurally immune to this whole class of failure:
-//   1. safe_str() forces ANY value (scalar, empty, or an unexpectedly
-//      multi-element array) into a guaranteed single-line string. Multi-element
-//      input is joined with "; " rather than dropped, so no data is ever lost --
-//      it would just be visible as one field packing more than expected.
-//   2. append_line() appends exactly ONE already-scalar string onto the
-//      accumulator at a time, via safe_str() first. Stacking a guaranteed
-//      1x1 onto an Nx1 column can never throw "inconsistent row/column
-//      dimensions" -- so the failure mode is eliminated structurally, not
-//      by fixing one particular value.
-//   3. The actual-vs-predicted table loop now measures the true element
-//      count of y_test_plot and y_pred_plot independently (via size(v,'*'),
-//      which is correct regardless of row- vs column-vector orientation,
-//      unlike the previous size(v,1)) and, if they ever differ, pads the
-//      shorter series with blank cells rather than truncating -- every row
-//      of the CSV ends up with exactly the same number of columns, and the
-//      full length of whichever series is longer is still written out in
-//      full (no column or data ever silently dropped).
-// ---------------------------------------------------------------------------
-
-function s = safe_str(v)
-    // Guarantees a 1x1 string out of literally anything passed in.
-    if type(v) == 10 & size(v, '*') <= 1 then
-        // Already a plain scalar (or empty) string -- the common case.
-        if size(v, '*') == 0 then
-            s = "";
-        else
-            s = v;
-        end
-    elseif size(v, '*') == 0 then
-        s = "n/a";
-    elseif size(v, '*') == 1 then
-        s = string(v);
-    else
-        // Unexpectedly more than one element: join them rather than pick
-        // one (or crash) -- keeps every bit of the underlying data visible
-        // in the exported file, just packed into a single field.
-        parts = string(v);
-        s = parts(1);
-        for k = 2:size(parts, '*')
-            s = s + "; " + parts(k);
-        end
-    end
-endfunction
-
-function acc = append_line(acc, piece)
-    // Appends exactly one guaranteed-scalar line onto a growing Nx1 column
-    // of strings. Because `piece` is coerced to 1x1 by safe_str() first,
-    // this vertical concatenation can never hit "inconsistent row/column
-    // dimensions", regardless of what shape `piece` would otherwise have been.
-    line1 = safe_str(piece);
-    if size(acc, '*') == 0 then
-        acc = line1;
-    else
-        acc = [acc; line1];
-    end
-endfunction
-
-function export_results_txt(path)
-    global gui app_state
-    // get(gui.results_text, "string") may come back as either a scalar
-    // string or a string matrix depending on the Scilab runtime. Previously
-    // this was folded directly into one big vertical concatenation, which
-    // broke ("inconsistent row/column dimensions") if it came back in a
-    // shape the rest of the concatenation didn't expect. Each existing
-    // results-panel line is now re-appended individually via append_line(),
-    // so whatever shape get() returns, every line lands safely.
-    raw_lines = get(gui.results_text, "string");
-    lines = [];
-    for k = 1:size(raw_lines, '*')
-        lines = append_line(lines, raw_lines(k));
-    end
-
-    if typeof(app_state.last_backtest) <> "constant" then
-        bt = app_state.last_backtest;
-        sharpe_str = "n/a"; if ~isnan(bt.sharpe_ratio) then sharpe_str = safe_str(bt.sharpe_ratio); end
-        winrate_str = "n/a"; if ~isnan(bt.win_rate_pct) then winrate_str = safe_str(bt.win_rate_pct) + "%"; end
-        lines = append_line(lines, " ");
-        lines = append_line(lines, "--- Last Backtest ---");
-        lines = append_line(lines, "Starting capital: " + safe_str(bt.starting_capital));
-        lines = append_line(lines, "Trades made: " + safe_str(bt.n_trades) + " (" + ..
-            safe_str(bt.n_completed_trades) + " completed round-trip(s))");
-        lines = append_line(lines, "Transaction cost: " + safe_str(bt.transaction_cost_pct) + ..
-            "%   Slippage: " + safe_str(bt.slippage_pct) + "%");
-        lines = append_line(lines, "Strategy final: " + safe_str(bt.strategy_final) + " (" + ..
-            safe_str(bt.strategy_return_pct) + "%)");
-        lines = append_line(lines, "Buy & Hold final: " + safe_str(bt.buyhold_final) + " (" + ..
-            safe_str(bt.buyhold_return_pct) + "%)");
-        lines = append_line(lines, "Max drawdown: " + safe_str(bt.max_drawdown_pct) + "%");
-        lines = append_line(lines, "Annualized volatility: " + safe_str(bt.volatility_pct_annualized) + "%");
-        lines = append_line(lines, "Sharpe ratio: " + sharpe_str);
-        lines = append_line(lines, "Win rate: " + winrate_str);
-    end
-    fd = mopen(path, "w");
-    mputl(lines, fd);
-    mclose(fd);
-endfunction
-
-function export_results_csv(path)
-    // A metrics block, then the full actual-vs-predicted test-set series --
-    // opens cleanly in Excel/Sheets/pandas. Built line-by-line via
-    // append_line()/safe_str() (see the comment above export_results_txt)
-    // so a single unexpectedly-shaped value can never break the whole export.
-    global app_state
-    lr = app_state.last_results;
-    lp = app_state.last_plot;
-
-    accuracy_str = "n/a"; if ~isnan(lr.accuracy_pct) then accuracy_str = safe_str(lr.accuracy_pct); end
-
-    lines = [];
-    lines = append_line(lines, "Metric,Value");
-    lines = append_line(lines, "Dataset," + safe_str(lr.dataset_label));
-    lines = append_line(lines, "Model," + safe_str(lr.model_name));
-    lines = append_line(lines, "Rows_Used," + safe_str(lr.rows_used));
-    lines = append_line(lines, "Train_Pct," + safe_str(round(lr.split_ratio*100)));
-    lines = append_line(lines, "Test_Pct," + safe_str(round((1-lr.split_ratio)*100)));
-    lines = append_line(lines, "RMSE," + safe_str(lr.rmse));
-    lines = append_line(lines, "MAE," + safe_str(lr.mae));
-    lines = append_line(lines, "MAPE_pct," + safe_str(lr.mape));
-    lines = append_line(lines, "R2," + safe_str(lr.r2));
-    lines = append_line(lines, "Prediction_Accuracy_pct," + accuracy_str);
-    lines = append_line(lines, "Current_Price," + safe_str(lr.current_price));
-    lines = append_line(lines, "Predicted_Next_Price," + safe_str(lr.next_price));
-    lines = append_line(lines, "Rough_Uncertainty_Band_Low_NOT_a_true_prediction_interval," + safe_str(lr.ci_lo));
-    lines = append_line(lines, "Rough_Uncertainty_Band_High_NOT_a_true_prediction_interval," + safe_str(lr.ci_hi));
-    lines = append_line(lines, "Predicted_Change_pct," + safe_str(lr.pct_change));
-    lines = append_line(lines, "Signal," + safe_str(lr.signal_action));
-    lines = append_line(lines, "Buy_Threshold_pct," + safe_str(lr.buy_threshold));
-    lines = append_line(lines, "Sell_Threshold_pct," + safe_str(lr.sell_threshold));
-
-    if typeof(app_state.last_backtest) <> "constant" then
-        bt = app_state.last_backtest;
-        sharpe_str = "n/a"; if ~isnan(bt.sharpe_ratio) then sharpe_str = safe_str(bt.sharpe_ratio); end
-        winrate_str = "n/a"; if ~isnan(bt.win_rate_pct) then winrate_str = safe_str(bt.win_rate_pct); end
-        lines = append_line(lines, "Backtest_Starting_Capital," + safe_str(bt.starting_capital));
-        lines = append_line(lines, "Backtest_Trades_Made," + safe_str(bt.n_trades));
-        lines = append_line(lines, "Backtest_Completed_RoundTrips," + safe_str(bt.n_completed_trades));
-        lines = append_line(lines, "Backtest_Transaction_Cost_pct," + safe_str(bt.transaction_cost_pct));
-        lines = append_line(lines, "Backtest_Slippage_pct," + safe_str(bt.slippage_pct));
-        lines = append_line(lines, "Backtest_Strategy_Final," + safe_str(bt.strategy_final));
-        lines = append_line(lines, "Backtest_Strategy_Return_pct," + safe_str(bt.strategy_return_pct));
-        lines = append_line(lines, "Backtest_BuyHold_Final," + safe_str(bt.buyhold_final));
-        lines = append_line(lines, "Backtest_BuyHold_Return_pct," + safe_str(bt.buyhold_return_pct));
-        lines = append_line(lines, "Backtest_Max_Drawdown_pct," + safe_str(bt.max_drawdown_pct));
-        lines = append_line(lines, "Backtest_Annualized_Volatility_pct," + safe_str(bt.volatility_pct_annualized));
-        lines = append_line(lines, "Backtest_Sharpe_Ratio," + sharpe_str);
-        lines = append_line(lines, "Backtest_Win_Rate_pct," + winrate_str);
-    end
-
-    lines = append_line(lines, "");
-    lines = append_line(lines, "Index,Actual,Predicted");
-
-    // size(v,'*') is the true element count regardless of whether v happens
-    // to be a column vector, a row vector, or a bare scalar -- unlike
-    // size(v,1), which silently returns 1 for a row vector and would have
-    // quietly produced a 1-row table instead of the intended n-row one.
-    // Genuinely shouldn't happen (both come from the same fitted model's
-    // test period), but if actual/predicted ever came back different
-    // lengths, every row below still gets written with exactly the same
-    // 3 columns and nothing is truncated -- the shorter series is padded
-    // with blank cells, not cut short. (No extra note row is inserted here:
-    // that would itself be a row with a different column count than its
-    // neighbors, which is exactly the inconsistency this fix exists to
-    // prevent -- a mismatch, if it ever happens, is visible instead as
-    // blank Actual/Predicted cells in the data below.)
-    n_actual = size(lp.y_test_plot, '*');
-    n_pred = size(lp.y_pred_plot, '*');
-    n = max(n_actual, n_pred);
-    for i = 1:n
-        if i <= n_actual then actual_cell = safe_str(lp.y_test_plot(i)); else actual_cell = ""; end
-        if i <= n_pred then pred_cell = safe_str(lp.y_pred_plot(i)); else pred_cell = ""; end
-        lines = append_line(lines, string(i) + "," + actual_cell + "," + pred_cell);
-    end
-
-    fd = mopen(path, "w");
-    mputl(lines, fd);
-    mclose(fd);
-endfunction
-
-function export_results_pdf(path)
-    // Exports the currently-displayed chart (redrawn fresh first, so it
-    // reflects the current moving-average checkbox state) as a PDF.
-    // drawnow() forces any pending render to flush before the export reads
-    // the window -- redraw_chart()'s plot/clf calls can otherwise still be
-    // queued rather than actually painted yet.
-    global CHART_FIGURE_ID
-    redraw_chart();
-    drawnow();
-    xs2pdf(CHART_FIGURE_ID, path);
-endfunction
-
-// ---------------------------------------------------------------------------
-// Callback: "Export Results" button. The save dialog offers CSV, PDF, and
-// TXT; whichever extension the user actually types/picks decides the
-// format (defaulting to TXT if the extension isn't recognized).
-// ---------------------------------------------------------------------------
-function on_export_results()
-    global gui app_state
-
-    if typeof(app_state.model) == "constant" then
-        set(gui.status_text, "string", "Run an analysis first -- nothing to export yet.");
-        return
-    end
-
-    path = uiputfile(["*.csv"; "*.pdf"; "*.txt"], pwd(), ..
-        "Export results as CSV (data table), PDF (chart), or TXT (summary)...");
-    if path == "" then
-        return   // user cancelled
-    end
-
-    [dummy_path, dummy_name, ext] = fileparts(path);
+    [pth, nm, ext] = fileparts(path);
     ext = convstr(ext, "l");
-
-    try
-        if ext == ".csv" then
-            export_results_csv(path);
-        elseif ext == ".pdf" then
-            export_results_pdf(path);
-        elseif ext == ".txt" then
-            export_results_txt(path);
-        else
-            // No recognized extension (e.g. the user typed a bare filename
-            // with none at all) -- default to TXT, and make sure the saved
-            // file actually carries that extension rather than ending up
-            // ambiguous/extension-less.
-            path = path + ".txt";
-            export_results_txt(path);
-        end
-    catch
-        messagebox(lasterror(), "Export failed", "error");
-        return
+    if pth == "" then pth = APP_DIR + "outputs/exports/"; end
+    if ~isdir(pth) then mkdir(pth); end
+    target = unique_path(pth + nm + ext);
+    rep = build_rep();
+    select ext
+    case ".txt" then
+        export_report_txt(target, rep);
+        [p2, n2, e2] = fileparts(target);
+        extra = export_companion_csvs(p2 + n2, rep);
+        msg = "Exported report + " + string(size(extra, 1)) + " CSV file(s): " + target;
+    case ".csv" then
+        export_results_csv(target, rep);
+        msg = "Exported CSV: " + target;
+    case ".pdf" then
+        xs2pdf(gui.fig, target);
+        msg = "Exported dashboard charts (PDF): " + target;
+    else
+        error("Unsupported export type [" + ext + "] -- use .txt, .csv or .pdf.");
     end
-    set(gui.status_text, "string", "Results exported to " + path);
 endfunction
 
 
-// ---------------------------------------------------------------------------
-// Menu callback: File > Load Custom CSV...
-// Expects the same column layout as the bundled samples: Date, Open, High,
-// Low, Close, Volume (this is exactly what the Python project's
-// export_for_scilab.py / fetch_data.py bridge scripts produce). Validated
-// the same way the bundled samples are, by load_dataset() itself.
-// ---------------------------------------------------------------------------
-function on_load_custom_csv()
-    global gui app_state
-    path = uigetfile(["*.csv"], "", "Select a CSV (Date,Open,High,Low,Close,Volume)");
-    if path == "" then
-        return   // user cancelled
+function on_export()
+    global gui app_state gui_quiet APP_DIR
+    if ~has(app_state.analysis) then set_status("Run Analysis first.", "error"); return; end
+    c = clock();
+    stamp = msprintf("%04d%02d%02d_%02d%02d%02d", c(1), c(2), c(3), c(4), c(5), floor(c(6)));
+    default_name = "StockVision_" + app_state.model_type + "_" + stamp + ".txt";
+    outdir = APP_DIR + "outputs/exports/";
+    if ~isdir(outdir) then mkdir(outdir); end
+    if gui_quiet then
+        path = outdir + default_name;
+    else
+        path = uiputfile(["*.txt"; "*.csv"; "*.pdf"], outdir + default_name, "Export results (.txt = full report + CSVs)");
+        if path == "" then set_status("Export cancelled.", "info"); return; end
     end
-
+    set_status("Exporting results...");
     try
-        d = load_dataset(path);
+        msg = export_to(path);
     catch
-        messagebox(lasterror(), "Could not load CSV", "error");
+        err = lasterror();
+        set_status("Export failed: " + err, "error");
+        show_dialog("Export error", err, "error");
         return
     end
+    set_status(msg, "ok");
+endfunction
 
-    app_state.custom_csv_path = path;
-    n_items = size(app_state.dataset_labels, 2);
-    set(gui.dataset_popup, "string", strcat(app_state.dataset_labels, "|") + "|Custom: " + path);
-    set(gui.dataset_popup, "value", n_items + 1);
-    app_state.data = d;
-    invalidate_model();
-    msg = "Loaded custom file: " + string(d.n) + " rows.";
-    if size(d.warnings, 1) > 0 then
-        msg = msg + " Note: " + strcat(d.warnings, " ");
-    end
-    set(gui.status_text, "string", msg);
+
+function on_model_info()
+    global app_state ES_ALPHA ES_BETA
+    lines = model_info_text(app_state.model_type, app_state.ar_lookback, ES_ALPHA, ES_BETA);
+    lines = [lines; " "; "Evaluation protocol (all models):"; ..
+        "  - chronological split, never shuffled; same test window for all"; ..
+        "  - scaling/fit parameters come from training rows only"; ..
+        "  - the forecast for day t uses data up to day t-1 only"; ..
+        "  - a naive last-value baseline is always reported alongside"];
+    show_dialog("Model Info", lines, "info");
+    set_status("Model info shown.", "info");
 endfunction
 
 
 function on_about()
-    messagebox([
-        "Stock Market Analysis & Prediction Studio"; " "; ..
-        "An interactive Scilab GUI for exploring Linear Regression and"; ..
-        "AR time-series forecasting on stock price data."; " "; ..
-        "All modeling logic lives in model_engine.sce and is covered by"; ..
-        "a headless test suite (test_model_engine.sce)."; " "; ..
-        "The bundled datasets are SYNTHETIC demo data, not real historical"; ..
-        "prices, and this app has no live market-data connection -- it"; ..
-        "only ever reads bundled or user-supplied CSV files."; " "; ..
-        "Educational tool -- not financial advice." ..
-    ], "About", "info");
+    show_dialog("About StockVision", ["StockVision -- stock analysis & prediction dashboard (Scilab)."; ..
+        "Linear Regression, AR and Holt exponential smoothing vs a naive baseline,"; ..
+        "walk-forward validation and a backtest vs buy & hold."; " "; ..
+        "Educational tool, not financial advice. Bundled data is synthetic."], "info");
+endfunction
+
+
+function use_custom_csv(path)
+    // Selects a custom CSV as the active dataset and clears stale results.
+    global gui app_state
+    app_state.custom_path = path;
+    app_state.dataset_idx = size(app_state.dataset_labels, 2) + 1;
+    names = [app_state.dataset_labels, "Custom: " + basename(path)];
+    set(gui.dataset_popup, "string", strcat(names, "|"));
+    set(gui.dataset_popup, "value", app_state.dataset_idx);
+    if load_current_dataset() then
+        invalidate("all", "Custom dataset loaded. Click Run Analysis.");
+    else
+        invalidate("all");
+    end
+endfunction
+
+
+function on_load_custom_csv()
+    path = uigetfile(["*.csv"], "", "Select a CSV (Date,Open,High,Low,Close,Volume)");
+    if path == "" then return; end
+    use_custom_csv(path);
+endfunction
+
+
+function on_reset()
+    global gui app_state
+    set(gui.dataset_popup, "string", strcat(app_state.dataset_labels, "|"));
+    set(gui.dataset_popup, "value", 1); app_state.dataset_idx = 1;
+    set(gui.model_popup, "value", 1); app_state.model_type = "LR";
+    set(gui.split_slider, "value", 0.8); app_state.split_ratio = 0.8;
+    set(gui.split_label, "string", "Train/test split: 80% / 20%");
+    set(gui.cb_ma, "value", 1); app_state.show_ma = %t;
+    set(gui.ed_lookback, "string", "10"); app_state.ar_lookback = 10;
+    set(gui.ed_folds, "string", "5"); app_state.n_folds = 5;
+    set(gui.ed_buy, "string", "0.5"); set(gui.ed_sell, "string", "-0.5");
+    set(gui.ed_capital, "string", "100000");
+    set(gui.ed_cost, "string", "0.1"); set(gui.ed_slip, "string", "0.05");
+    if load_current_dataset() then
+        invalidate("all", "Reset to defaults. No analysis yet.");
+    else
+        invalidate("all");
+    end
+    show_info_tab("dq");
 endfunction
 
 
 // ---------------------------------------------------------------------------
-// Build the window
+// Layout: all positions are normalized (origin bottom-left) so the dashboard
+// scales with the window.
 // ---------------------------------------------------------------------------
-gui.fig = figure("figure_name", "Stock Market Analysis & Prediction Studio", ..
-                  "position", [50, 50, 1050, 900]);
+HEAD_H = 0.024;
 
-// --- menu bar ---
+function h = mk_text(str, x, y, w, hh, bold, align)
+    global gui GUI_BG
+    h = uicontrol(gui.fig, "style", "text", "string", str, "units", "normalized", ..
+                  "position", [x y w hh], "backgroundcolor", GUI_BG, "fontsize", 11, ..
+                  "horizontalalignment", align);
+    if bold then set(h, "fontweight", "bold"); end
+endfunction
+
+
+function h = mk_head(str, x, y, w)
+    // Dark section heading bar whose top edge is at y + HEAD_H.
+    global gui GUI_HEAD
+    h = uicontrol(gui.fig, "style", "text", "string", " " + str, "units", "normalized", ..
+                  "position", [x y w 0.024], "backgroundcolor", GUI_HEAD, ..
+                  "foregroundcolor", [1 1 1], "fontweight", "bold", "fontsize", 11, ..
+                  "horizontalalignment", "left");
+endfunction
+
+
+function h = mk_edit(str, x, y, w, cb, tip)
+    global gui
+    h = uicontrol(gui.fig, "style", "edit", "string", str, "units", "normalized", ..
+                  "position", [x y w 0.026], "backgroundcolor", [1 1 1], "fontsize", 11, ..
+                  "callback", cb, "tooltipstring", tip);
+endfunction
+
+
+function h = mk_button(str, x, y, w, cb, tip)
+    global gui
+    h = uicontrol(gui.fig, "style", "pushbutton", "string", str, "units", "normalized", ..
+                  "position", [x y w 0.040], "fontsize", 11, "fontweight", "bold", ..
+                  "callback", cb, "tooltipstring", tip);
+endfunction
+
+
+function [lb, hd] = mk_list_panel(title, x, y, w, hh)
+    // Heading + monospaced listbox filling the rest of the panel.
+    global gui
+    hd = mk_head(title, x, y + hh - 0.024, w);
+    lb = uicontrol(gui.fig, "style", "listbox", "units", "normalized", ..
+                   "position", [x y w hh - 0.024], "backgroundcolor", [1 1 1], ..
+                   "fontname", "Monospaced", "fontsize", 9);
+endfunction
+
+
+function [ax, hd] = mk_axes_panel(title, x, y, w, hh)
+    hd = mk_head(title, x, y + hh - 0.024, w);
+    ax = make_axes(x, y, w, hh - 0.024);
+endfunction
+
+
+// --- figure -----------------------------------------------------------------
+scr = get(0, "screensize_px");
+fig_w = min(1500, scr(3) - 20); fig_h = min(980, scr(4) - 60);
+gui.fig = figure("figure_name", "StockVision -- Stock Analysis & Prediction (Scilab)", ..
+                 "position", [5, 5, fig_w, fig_h], "dockable", "off");
+gui.fig.background = color(236, 238, 241);
+toolbar(gui.fig.figure_id, "off");
+for nm = ["File", "Tools", "Edit", "?"]
+    delmenu(gui.fig.figure_id, nm);
+end
+for k = size(gui.fig.children, "*"):-1:1
+    if gui.fig.children(k).type == "Axes" then delete(gui.fig.children(k)); end
+end
+gui.fig.immediate_drawing = "off";
+
 m_file = uimenu(gui.fig, "label", "File");
 uimenu(m_file, "label", "Load Custom CSV...", "callback", "on_load_custom_csv()");
+uimenu(m_file, "label", "Export Results...", "callback", "on_export()");
 uimenu(m_file, "label", "Exit", "callback", "close(gui.fig)");
 m_help = uimenu(gui.fig, "label", "Help");
+uimenu(m_help, "label", "Model Info", "callback", "on_model_info()");
 uimenu(m_help, "label", "About", "callback", "on_about()");
 
-// Every uicontrol below uses "units","normalized" with its position given as
-// a fraction (0-1) of the figure's width/height, computed once from the
-// original 1050x900 design (e.g. x_frac = x_px/1050). This is a deliberate
-// change from fixed pixel positions: Scilab recomputes normalized positions
-// itself, from its own internal rendering size, every time the figure is
-// resized/maximized/restored -- so the layout can never depend on a script
-// reading the figure's current size correctly. (An earlier version of this
-// fix used a resizefcn callback that read gui.fig.figure_size and shifted
-// pixel positions manually; that measurably overshot in live testing on
-// Windows -- Data Selection and the Model label were pushed off the top
-// entirely on maximize, worse than the original bug -- so it's been
-// replaced with this approach rather than patched further.)
+// --- title band ---------------------------------------------------------------
+gui.title = uicontrol(gui.fig, "style", "text", "string", "  STOCKVISION", "units", "normalized", ..
+    "position", [0 0.946 0.20 0.054], "backgroundcolor", GUI_HEAD, "foregroundcolor", [1 1 1], ..
+    "fontsize", 22, "fontweight", "bold", "horizontalalignment", "left");
+gui.subtitle = uicontrol(gui.fig, "style", "text", "units", "normalized", ..
+    "string", "Stock analysis & prediction dashboard  |  Linear Regression, AR and Exponential Smoothing vs a naive baseline  |  built with Scilab", ..
+    "position", [0.20 0.946 0.80 0.054], "backgroundcolor", GUI_HEAD, "foregroundcolor", [0.85 0.9 1], ..
+    "fontsize", 12, "horizontalalignment", "left");
 
-// --- panel 1: data + model + split + MA (top-left) ---
-gui.frame_data_selection = uicontrol(gui.fig, "style", "frame", "units", "normalized", ..
-    "position", [0.009524, 0.688889, 0.247619, 0.300000]);
-gui.label_data_selection = uicontrol(gui.fig, "style", "text", "string", "1. Data Selection", "fontweight", "bold", ..
-    "units", "normalized", "position", [0.019048, 0.950000, 0.190476, 0.022222], "horizontalalignment", "left");
-gui.dataset_popup = uicontrol(gui.fig, "style", "popupmenu", ..
-    "string", strcat(app_state.dataset_labels, "|"), ..
-    "units", "normalized", "position", [0.019048, 0.913333, 0.228571, 0.027778], "callback", "on_dataset_changed()");
-
-gui.label_model = uicontrol(gui.fig, "style", "text", "string", "2. Model", "fontweight", "bold", ..
-    "units", "normalized", "position", [0.019048, 0.875556, 0.190476, 0.022222], "horizontalalignment", "left");
-// A single 3-item popupmenu instead of one radiobutton per model -- see the
-// comment above on_model_changed() for why. Also frees up the vertical
-// space the second radiobutton used to occupy (left as breathing room
-// below rather than repacking every position beneath it).
+// --- left column: controls ------------------------------------------------------
+LX = 0.006; LW = 0.190;
+mk_head("DATASET & MODEL", LX, 0.915, LW);
+mk_text("Dataset", LX, 0.888, LW, 0.022, %f, "left");
+gui.dataset_popup = uicontrol(gui.fig, "style", "popupmenu", "string", strcat(app_state.dataset_labels, "|"), ..
+    "units", "normalized", "position", [LX 0.858 LW 0.028], "fontsize", 11, "value", 1, ..
+    "callback", "on_dataset_changed()", "tooltipstring", "Bundled synthetic datasets, or File > Load Custom CSV");
+mk_text("Model", LX, 0.830, LW, 0.022, %f, "left");
 gui.model_popup = uicontrol(gui.fig, "style", "popupmenu", ..
-    "string", "Linear Regression|AR Time-Series (autoregressive)|Exponential Smoothing (Holt)", ..
-    "units", "normalized", "position", [0.019048, 0.844444, 0.228571, 0.027778], "callback", "on_model_changed()");
+    "string", "Linear Regression|AR Time-Series|Exponential Smoothing", ..
+    "units", "normalized", "position", [LX 0.800 LW 0.028], "fontsize", 11, "value", 1, ..
+    "callback", "on_model_changed()", "tooltipstring", "Model analysed by Run Analysis and Run Backtest");
 
-gui.label_split = uicontrol(gui.fig, "style", "text", "string", "3. Train/Test Split", "fontweight", "bold", ..
-    "units", "normalized", "position", [0.019048, 0.777778, 0.190476, 0.022222], "horizontalalignment", "left");
+mk_head("PARAMETERS", LX, 0.765, LW);
+mk_text("Train / test split", LX, 0.738, LW, 0.022, %f, "left");
 gui.split_slider = uicontrol(gui.fig, "style", "slider", "min", 0.5, "max", 0.95, "value", 0.8, ..
-    "units", "normalized", "position", [0.019048, 0.753333, 0.228571, 0.022222], "callback", "on_slider_moved()");
-gui.split_label = uicontrol(gui.fig, "style", "text", "string", "Train/Test split: 80% / 20%", ..
-    "units", "normalized", "position", [0.019048, 0.727778, 0.228571, 0.020000], "horizontalalignment", "left");
+    "units", "normalized", "position", [LX 0.714 LW 0.022], "callback", "on_split_moved_wrapper()", ..
+    "tooltipstring", "Share of rows used for training. The rest is the test window.");
+gui.split_label = mk_text("Train/test split: 80% / 20%", LX, 0.690, LW, 0.022, %f, "left");
+gui.cb_ma = uicontrol(gui.fig, "style", "checkbox", "string", "Show 20-day moving average", "value", 1, ..
+    "units", "normalized", "position", [LX 0.660 LW 0.026], "fontsize", 11, "backgroundcolor", GUI_BG, ..
+    "callback", "on_ma_toggled()");
+mk_text("AR lookback (days)", LX, 0.630, 0.125, 0.024, %f, "left");
+gui.ed_lookback = mk_edit("10", 0.133, 0.630, 0.063, "on_model_params_changed()", "Past closes used by the AR model (2-60)");
+mk_text("Walk-forward folds", LX, 0.598, 0.125, 0.024, %f, "left");
+gui.ed_folds = mk_edit("5", 0.133, 0.598, 0.063, "on_model_params_changed()", "Requested folds (1-10); reduced automatically if data is short");
+mk_text("Exp. smoothing: alpha 0.30, beta 0.10 (fixed)", LX, 0.568, LW, 0.022, %f, "left");
 
-gui.cb_moving_avg = uicontrol(gui.fig, "style", "checkbox", "string", "Show 20-day moving average", ..
-    "value", 0, "units", "normalized", "position", [0.019048, 0.700000, 0.228571, 0.022222], "callback", "on_ma_toggle()");
+mk_head("STRATEGY & COSTS", LX, 0.535, LW);
+mk_text("BUY if forecast >= (%)", LX, 0.508, 0.125, 0.024, %f, "left");
+gui.ed_buy = mk_edit("0.5", 0.133, 0.508, 0.063, "on_strategy_changed()", "BUY when predicted change is at least this percent");
+mk_text("SELL if forecast <= (%)", LX, 0.478, 0.125, 0.024, %f, "left");
+gui.ed_sell = mk_edit("-0.5", 0.133, 0.478, 0.063, "on_strategy_changed()", "SELL (exit) when predicted change is at most this percent");
+mk_text("Starting capital", LX, 0.448, 0.125, 0.024, %f, "left");
+gui.ed_capital = mk_edit("100000", 0.133, 0.448, 0.063, "on_strategy_changed()", "Initial portfolio value for the backtest");
+mk_text("Transaction cost (%)", LX, 0.418, 0.125, 0.024, %f, "left");
+gui.ed_cost = mk_edit("0.1", 0.133, 0.418, 0.063, "on_strategy_changed()", "Percent of portfolio value per executed trade");
+mk_text("Slippage (%)", LX, 0.388, 0.125, 0.024, %f, "left");
+gui.ed_slip = mk_edit("0.05", 0.133, 0.388, 0.063, "on_strategy_changed()", "Extra percent per executed trade");
 
-// --- panel 2: thresholds, AR lookback, and backtest costs ---
-gui.frame_thresholds = uicontrol(gui.fig, "style", "frame", "units", "normalized", ..
-    "position", [0.009524, 0.466667, 0.247619, 0.211111]);
-gui.label_thresholds = uicontrol(gui.fig, "style", "text", "string", "4. Thresholds & Costs", "fontweight", "bold", ..
-    "units", "normalized", "position", [0.019048, 0.650000, 0.209524, 0.022222], "horizontalalignment", "left");
+mk_head("ACTIONS", LX, 0.350, LW);
+gui.btn_run = mk_button("Run Analysis", LX, 0.303, LW, "on_run_analysis()", "Fit the selected model and evaluate it on the test window");
+gui.btn_compare = mk_button("Compare Models", LX, 0.259, LW, "on_compare()", "Naive vs LR vs AR vs ES on the same window, with ranking");
+gui.btn_backtest = mk_button("Run Backtest", LX, 0.215, LW, "on_run_backtest()", "Trade the model signals vs buy & hold (needs Run Analysis)");
+gui.btn_wf = mk_button("Walk Forward Validation", LX, 0.171, LW, "on_walk_forward()", "Expanding-window validation over several chronological folds");
+gui.btn_export = mk_button("Export Results", LX, 0.127, LW, "on_export()", "Save report (.txt) + CSV tables, a CSV, or chart PDF");
+gui.btn_info = mk_button("Model Info", LX, 0.083, 0.093, "on_model_info()", "Assumptions and limitations of the selected model");
+gui.btn_reset = mk_button("Reset", LX + 0.097, 0.083, 0.093, "on_reset()", "Restore default settings and clear results");
 
-gui.label_buy = uicontrol(gui.fig, "style", "text", "string", "Buy signal at (%):", ..
-    "units", "normalized", "position", [0.019048, 0.616667, 0.142857, 0.022222], "horizontalalignment", "left");
-gui.buy_threshold_edit = uicontrol(gui.fig, "style", "edit", "string", "0.5", ..
-    "units", "normalized", "position", [0.171429, 0.616667, 0.066667, 0.024444]);
+// --- right area: dashboard panels ----------------------------------------------
+RX = 0.202;
+function ph = mk_placeholder(x, y, w, hh)
+    // White frame + centred grey text shown while a chart has no data yet.
+    global gui
+    fr = uicontrol(gui.fig, "style", "frame", "units", "normalized", "position", [x y w hh], ..
+                   "backgroundcolor", [1 1 1]);
+    tx = uicontrol(gui.fig, "style", "text", "string", "", "units", "normalized", ..
+                   "position", [x, y + hh/2 - 0.015, w, 0.03], "backgroundcolor", [1 1 1], ..
+                   "foregroundcolor", [0.5 0.5 0.5], "fontsize", 13, "horizontalalignment", "center");
+    ph = list(fr, tx);
+endfunction
 
-gui.label_sell = uicontrol(gui.fig, "style", "text", "string", "Sell signal at (%):", ..
-    "units", "normalized", "position", [0.019048, 0.583333, 0.142857, 0.022222], "horizontalalignment", "left");
-gui.sell_threshold_edit = uicontrol(gui.fig, "style", "edit", "string", "-0.5", ..
-    "units", "normalized", "position", [0.171429, 0.583333, 0.066667, 0.024444]);
 
-gui.label_ar_lookback = uicontrol(gui.fig, "style", "text", "string", "AR lookback (days):", ..
-    "units", "normalized", "position", [0.019048, 0.550000, 0.142857, 0.022222], "horizontalalignment", "left");
-gui.ar_lookback_edit = uicontrol(gui.fig, "style", "edit", "string", "10", ..
-    "units", "normalized", "position", [0.171429, 0.550000, 0.066667, 0.024444]);
+// Row A: main chart + info panel (data quality / assumptions tabs)
+gui.head_main = mk_head("PRICE & PREDICTION", RX, 0.658 + 0.282 - 0.024, 0.498);
+gui.key_main = uicontrol(gui.fig, "style", "text", "string", "", "units", "normalized", ..
+    "position", [RX 0.658 + 0.282 - 0.024 - 0.024 0.498 0.024], "backgroundcolor", [1 1 1], "fontsize", 10, ..
+    "horizontalalignment", "left");
+gui.ax_main = make_axes(RX, 0.658, 0.498, 0.282 - 0.048);
+[gui.lb_info, gui.head_info] = mk_list_panel("INFO", 0.706, 0.658, 0.288, 0.282);
+gui.tab_dq = uicontrol(gui.fig, "style", "pushbutton", "string", "Data Quality", "units", "normalized", ..
+    "position", [0.790 0.9165 0.100 0.022], "fontsize", 10, "callback", "show_info_tab(""dq"")", ..
+    "tooltipstring", "Rows, date range, missing/duplicate/invalid rows, train/test rows");
+gui.tab_asm = uicontrol(gui.fig, "style", "pushbutton", "string", "Assumptions", "units", "normalized", ..
+    "position", [0.892 0.9165 0.100 0.022], "fontsize", 10, "callback", "show_info_tab(""asm"")", ..
+    "tooltipstring", "Capital, costs, slippage, signal lag, position rule, periods");
+// Row B: results + comparison/ranking + comparison chart
+[gui.lb_res, gui.head_res] = mk_list_panel("MODEL RESULTS", RX, 0.340, 0.205, 0.315);
+[gui.lb_cmp, gui.head_cmp] = mk_list_panel("MODEL COMPARISON & RANKING", 0.412, 0.340, 0.288, 0.315);
+[gui.ax_cmp, gui.head_cmpchart] = mk_axes_panel("MODEL COMPARISON CHART", 0.706, 0.340, 0.288, 0.315);
+// Backtest summary strip
+gui.strip = uicontrol(gui.fig, "style", "text", "string", "  Backtest summary: not run yet", "units", "normalized", ..
+    "position", [RX 0.316 0.792 0.022], "backgroundcolor", [0.86 0.90 0.95], "fontsize", 12, ..
+    "fontweight", "bold", "horizontalalignment", "left");
+// Row C: equity chart + backtest summary + walk-forward
+[gui.ax_eq, gui.head_eq] = mk_axes_panel("BACKTEST: EQUITY CURVE", RX, 0.044, 0.290, 0.268);
+[gui.lb_bt, gui.head_bt] = mk_list_panel("BACKTEST SUMMARY (strategy vs buy & hold)", 0.497, 0.044, 0.203, 0.268);
+[gui.lb_wf, gui.head_wf] = mk_list_panel("WALK-FORWARD VALIDATION", 0.706, 0.044, 0.288, 0.268);
 
-gui.label_txn = uicontrol(gui.fig, "style", "text", "string", "Txn cost / trade (%):", ..
-    "units", "normalized", "position", [0.019048, 0.516667, 0.142857, 0.022222], "horizontalalignment", "left");
-gui.txn_cost_edit = uicontrol(gui.fig, "style", "edit", "string", "0", ..
-    "units", "normalized", "position", [0.171429, 0.516667, 0.066667, 0.024444]);
+gui.ph_main = mk_placeholder(RX, 0.658, 0.498, 0.234);
+gui.ph_cmp = mk_placeholder(0.706, 0.340, 0.288, 0.291);
+gui.ph_eq = mk_placeholder(RX, 0.044, 0.290, 0.244);
 
-gui.label_slippage = uicontrol(gui.fig, "style", "text", "string", "Slippage (%):", ..
-    "units", "normalized", "position", [0.019048, 0.483333, 0.142857, 0.022222], "horizontalalignment", "left");
-gui.slippage_edit = uicontrol(gui.fig, "style", "edit", "string", "0", ..
-    "units", "normalized", "position", [0.171429, 0.483333, 0.066667, 0.024444]);
+// --- status bar -------------------------------------------------------------------
+gui.status = uicontrol(gui.fig, "style", "text", "string", " Ready.", "units", "normalized", ..
+    "position", [0 0 1 0.036], "backgroundcolor", [0.82 0.84 0.88], "foregroundcolor", [0.15 0.15 0.15], ..
+    "fontsize", 12, "fontweight", "bold", "horizontalalignment", "left");
 
-// --- panel 3: actions, 3x2 grid ---
-gui.frame_actions = uicontrol(gui.fig, "style", "frame", "units", "normalized", ..
-    "position", [0.009524, 0.288889, 0.247619, 0.166667]);
-gui.btn_run_analysis = uicontrol(gui.fig, "style", "pushbutton", "string", "Run Analysis", "fontweight", "bold", ..
-    "units", "normalized", "position", [0.019048, 0.400000, 0.104762, 0.033333], "callback", "on_run_analysis()");
-gui.btn_run_backtest = uicontrol(gui.fig, "style", "pushbutton", "string", "Run Backtest", "fontweight", "bold", ..
-    "units", "normalized", "position", [0.133333, 0.400000, 0.104762, 0.033333], "callback", "on_run_backtest()");
-gui.btn_model_info = uicontrol(gui.fig, "style", "pushbutton", "string", "Model Info", ..
-    "units", "normalized", "position", [0.019048, 0.355556, 0.104762, 0.033333], "callback", "on_model_info()");
-gui.btn_reset = uicontrol(gui.fig, "style", "pushbutton", "string", "Reset", ..
-    "units", "normalized", "position", [0.133333, 0.355556, 0.104762, 0.033333], "callback", "on_reset()");
-gui.btn_compare = uicontrol(gui.fig, "style", "pushbutton", "string", "Compare", ..
-    "units", "normalized", "position", [0.019048, 0.311111, 0.104762, 0.033333], "callback", "on_compare_models()");
-gui.btn_export = uicontrol(gui.fig, "style", "pushbutton", "string", "Export", ..
-    "units", "normalized", "position", [0.133333, 0.311111, 0.104762, 0.033333], "callback", "on_export_results()");
 
-gui.status_text = uicontrol(gui.fig, "style", "text", "string", "Pick a dataset to begin.", ..
-    "units", "normalized", "position", [0.009524, 0.250000, 0.247619, 0.027778], "horizontalalignment", "left");
+function on_split_moved_wrapper()
+    // The slider fires continuously; on_slider_moved ignores unchanged values.
+    on_slider_moved();
+endfunction
 
-// --- panel 4: results (bottom-left) ---
-gui.frame_results = uicontrol(gui.fig, "style", "frame", "units", "normalized", ..
-    "position", [0.009524, 0.011111, 0.247619, 0.227778]);
-gui.label_results = uicontrol(gui.fig, "style", "text", "string", "Results", "fontweight", "bold", ..
-    "units", "normalized", "position", [0.019048, 0.213333, 0.104762, 0.020000], "horizontalalignment", "left");
-// Colored BUY/SELL/HOLD indicator, sharing the same row as "Results" but
-// right-aligned in the remaining panel width -- see on_run_analysis().
-gui.label_signal_indicator = uicontrol(gui.fig, "style", "text", "string", "", "fontweight", "bold", ..
-    "units", "normalized", "position", [0.133333, 0.213333, 0.114286, 0.020000], "horizontalalignment", "right");
-gui.results_text = uicontrol(gui.fig, "style", "listbox", ..
-    "string", "Run an analysis to see results here.", ..
-    "units", "normalized", "position", [0.019048, 0.022222, 0.228571, 0.183333]);
 
-// --- chart placeholder (right side) -- charts open in their OWN dedicated
-// windows (CHART_FIGURE_ID / BACKTEST_FIGURE_ID), deliberately never drawn
-// into this main window: clf()-ing a figure that also holds every button,
-// slider, and panel would wipe the whole GUI out along with the chart. ---
-gui.frame_chart_placeholder = uicontrol(gui.fig, "style", "frame", "units", "normalized", ..
-    "position", [0.271429, 0.011111, 0.719048, 0.977778]);
-// NOTE: uicontrol's "string" property for style="text" requires a single
-// (scalar) string -- passing a multi-row/multi-element matrix here throws
-// "Wrong size for 'String' property: string expected." at runtime. Build one
-// scalar string with embedded newlines instead (ascii(10) = LF), the same
-// "+" string-concatenation already used throughout model_engine.sce's own
-// error messages. (messagebox() elsewhere in this file is a different API
-// that does accept a matrix for multi-line messages -- not affected.)
-chart_placeholder_msg = "Charts open in separate windows." + ascii(10) + ascii(10) + ..
-    "Click Run Analysis to open the actual-vs-predicted chart." + ascii(10) + ..
-    "Click Run Backtest to open the strategy-vs-buy&hold chart." + ascii(10) + ascii(10) + ..
-    "This window stays open and interactive the whole time --" + ascii(10) + ..
-    "closing a chart window never closes this one.";
-gui.label_chart_placeholder = uicontrol(gui.fig, "style", "text", ..
-    "string", chart_placeholder_msg, ..
-    "units", "normalized", "position", [0.319048, 0.444444, 0.623810, 0.111111], "horizontalalignment", "center", ..
-    "fontsize", 3, "foregroundcolor", [0.5 0.5 0.5]);
-
-// Load the first dataset by default so the window isn't empty on first run.
-on_dataset_changed();
-
-disp("GUI built. Interact with the window that just opened.");
+// --- start -----------------------------------------------------------------------
+if load_current_dataset() then
+    refresh_all();
+    show_info_tab("dq");
+    set_status("Ready. Choose a model and click Run Analysis (or Compare Models).", "info");
+else
+    refresh_all();
+end
+gui.fig.immediate_drawing = "on";

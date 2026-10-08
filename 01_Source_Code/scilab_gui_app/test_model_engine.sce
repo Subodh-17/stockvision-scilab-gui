@@ -1,14 +1,5 @@
-// ============================================================================
-// test_model_engine.sce
-// -----------------------------------------------------------------------
-// Headless test suite for model_engine.sce -- validates every computational
-// function the GUI calls, with NO display/GUI required. Run this after any
-// change to model_engine.sce, and before trusting the GUI's numbers, since
-// this is the part of the app that can be fully automated-tested.
-//
-// Run with:
-//   scilab-cli -nwni -f test_model_engine.sce -quit
-// ============================================================================
+// test_model_engine.sce -- headless tests for model_engine.sce (no GUI needed).
+// Run: scilab-cli -nb -f test_model_engine.sce   (from this folder)
 
 clear; clc;
 exec("model_engine.sce", -1);
@@ -25,10 +16,7 @@ function check(condition, message)
     end
 endfunction
 
-// ---------------------------------------------------------------------------
-// Small test-only fixture helpers (NOT part of the app -- just used to build
-// synthetic CSV files for exercising load_dataset's validation logic).
-// ---------------------------------------------------------------------------
+// Test-only fixture helpers for building CSV files.
 function s2 = pad2(v)
     if v < 10 then s2 = "0" + string(v); else s2 = string(v); end
 endfunction
@@ -171,10 +159,7 @@ catch
 end
 check(caught, "load_dataset: a CSV missing the Volume column (5 columns instead of 6) is rejected");
 
-// -- a single malformed date mixed into an otherwise-good file: dropped as
-// a bad row, not fatal to the whole file (distinct from Test 1b's "messy"
-// case above, which mixes several different kinds of bad rows at once --
-// this isolates JUST a bad date, e.g. an impossible day-of-month) --
+// A single impossible date is dropped as a bad row, not fatal.
 bad_date_lines = good_lines;
 bad_date_lines(5) = "2024-13-45,100,101,99,100,1000";   // invalid month AND day
 write_csv(TMP + "bad_dates.csv", bad_date_lines);
@@ -182,13 +167,8 @@ d_bd = load_dataset(TMP + "bad_dates.csv");
 check(d_bd.n == 34, "load_dataset: a single malformed-date row is dropped, not fatal to the whole file");
 check(size(d_bd.warnings, 1) > 0, "load_dataset: dropping a malformed-date row produces a warning");
 
-// -- constant prices, through the FULL pipeline (load_dataset -> both
-// models), not just the hand-built-struct AR test further down. Every one
-// of the 12 LR features becomes constant across all rows (Open=High-1=
-// Low+1=Close=MA5=MA10=Lag1-3 all identical; Return_1d and Volatility_5
-// are both exactly 0 for a flat series), which drives every feature's
-// training-set standard deviation to 0 -- exercising the sigma==0 guard
-// in fit_linear_regression on every single column at once, not just one. --
+// Constant prices through the full pipeline: every LR feature has zero
+// training std, exercising the sigma==0 guard on every column.
 const_lines = ["Date,Open,High,Low,Close,Volume"];
 for i = 1:35
     const_lines = [const_lines; make_date(2024, i-1) + ",50,50,50,50,1000"];
@@ -360,8 +340,7 @@ check(abs(ma2($) - mean([105;106;107])) < 1e-9, ..
       "moving_average: later points match plain (no-history) behavior once the window is full");
 
 // ---------------------------------------------------------------------------
-// Test 6: consistency across all three bundled datasets (each should fit
-// cleanly with no errors -- catches dataset-specific edge cases)
+// Test 6: all bundled datasets fit cleanly
 // ---------------------------------------------------------------------------
 for i = 1:size(datasets, 2)
     d = load_dataset(datasets(i));
@@ -376,11 +355,8 @@ for i = 1:size(datasets, 2)
 end
 
 // ---------------------------------------------------------------------------
-// Test 6b: extreme volatility, at the dataset/model-fitting level (distinct
-// from Test 7's extreme-volatility BACKTEST stress test below -- this one
-// exercises build_lr_features/fit_linear_regression/fit_ar_model directly
-// on a synthetic series with large, rapid, non-periodic-looking
-// oscillations, well beyond anything in the bundled "volatile" dataset).
+// Test 6b: extreme volatility at the fitting level (distinct from the
+// backtest stress test in Test 7).
 // ---------------------------------------------------------------------------
 n_wild = 40;
 idx_wild = (1:n_wild)';
@@ -404,17 +380,11 @@ check(~isnan(wild_ar_eval.rmse) & ~isinf(wild_ar_eval.rmse), ..
       "fit_ar_model: the same extremely volatile synthetic series fits without NaN/Inf");
 
 // ---------------------------------------------------------------------------
-// Test 7: run_backtest -- hand-verified scenarios with known exact outcomes.
-// NOTE: run_backtest now enforces an explicit one-day execution lag (a
-// signal computed using day i's prediction can only affect the return
-// realized from day i onward -- never the return already realized BY day
-// i). The scenarios below are constructed with that lag in mind.
+// Test 7: run_backtest -- hand-verified scenarios (one-day execution lag).
 // ---------------------------------------------------------------------------
 
-// 7a. A SELL signal that fires the day BEFORE a crash lets the (lagged)
-// strategy get out in time and avoid it entirely; a signal firing only on
-// the crash day itself (as in a naive same-day-effect backtest) would NOT
-// avoid the loss -- this is the direct behavioral test for the timing fix.
+// 7a. A SELL the day BEFORE a crash avoids it; a signal on the crash day
+// itself must not (direct test of the execution lag).
 actual_avoid = [100; 105; 105; 80];
 pred_avoid   = [%nan; 104; 95; 70];   // day2: +4%->BUY. day3: -9.5%->SELL (one day before the crash)
 bt = run_backtest(actual_avoid, pred_avoid, 0.5, -0.5, 1000);
@@ -441,10 +411,8 @@ check(bt_lag.strategy_final < bt.strategy_final, ..
 check(abs(bt_lag.strategy_final - 1000*(105/105)*(1 - 0.238095238)) < 1e-4, ..
       "run_backtest: same-day-signal scenario matches the exact lagged-execution arithmetic");
 
-// 7b. If the model signals BUY on day 2 and never sells, the ONE-DAY ENTRY
-// LAG means the strategy misses day1->day2's move entirely (it can only
-// start earning from day 3 onward) -- so it must end up STRICTLY BELOW
-// buy-and-hold, by exactly the ratio of the missed first leg.
+// 7b. A BUY on day 2 with the entry lag misses the day1->day2 move, so the
+// strategy ends strictly below buy-and-hold by exactly that missed leg.
 actual_up = [100; 102; 104; 106; 108];
 pred_up   = [%nan; 103; 105; 107; 109];   // consistently signals BUY, never SELL
 bt2 = run_backtest(actual_up, pred_up, 0.5, -0.5, 1000);
@@ -497,10 +465,7 @@ check(bt_cost.strategy_final > bt.buyhold_final, ..
 check(abs(bt_cost.starting_capital - 1000) < 1e-9, ..
       "run_backtest: the returned struct carries the starting capital it was actually given");
 
-// 7f2. Slippage must ALSO actually reduce portfolio value on its own (not
-// just be accepted as a parameter and silently ignored) -- and it must
-// combine ADDITIVELY with transaction cost, exactly as documented
-// (transaction_cost_pct + slippage_pct, applied together per trade).
+// 7f2. Slippage must reduce value on its own and add to transaction cost.
 bt_slip = run_backtest(actual_avoid, pred_avoid, 0.5, -0.5, 1000, 0, 1);   // 0%% txn cost, 1%% slippage only
 check(abs(bt_slip.strategy_final - 980.1) < 1e-6, ..
       "run_backtest: slippage ALONE (zero transaction cost) reduces the ending value identically to " + ..
@@ -511,16 +476,9 @@ check(abs(bt_both.strategy_final - 980.1) < 1e-6, ..
       "run_backtest: transaction cost and slippage combine additively (0.5%%+0.5%%), matching the " + ..
       "single-1%%-cost result exactly");
 
-// 7g. Risk metrics (Sharpe, volatility, max drawdown) verified against
-// INDEPENDENTLY hand-derived values -- not just "did it run", but "does it
-// match a computation done a completely separate way". The strategy_value
-// sequence itself is first confirmed to match a hand-derived exact
-// sequence (entering on day 2, riding known +/-10% moves from day 3
-// onward thanks to the entry lag), and Sharpe/volatility are then
-// recomputed from that SAME known sequence using Scilab's own mean/stdev
-// directly in the test -- not by calling anything from model_engine.sce --
-// so a bug in run_backtest's formula (wrong ddof, wrong sqrt(252)
-// placement, an off-by-one slice) would actually be caught here.
+// 7g. Sharpe/volatility/drawdown against independently derived values:
+// strategy_value is checked against a hand-derived sequence, then Sharpe and
+// volatility are recomputed in the test with Scilab's own mean/stdev.
 actual_risk = [100; 100; 110; 99; 108.9];             // day4->day5 is +10% (108.9 = 99*1.1 exactly)
 pred_risk   = [%nan; 102; 102; 112.2; 100.98];         // always +2% vs prior actual -> always BUY, never SELL
 bt_risk = run_backtest(actual_risk, pred_risk, 0.5, -0.5, 1000);
@@ -574,12 +532,8 @@ check(bt_n2.n_trades == 1 & bt_n2.n_completed_trades == 0, ..
 check(isnan(bt_n2.sharpe_ratio) & isnan(bt_n2.win_rate_pct), ..
       "run_backtest: 2-row input has too few points for Sharpe/win-rate -- NaN, not a crash");
 
-// 7k. Edge case: missing/NaN data. A NaN in y_actual (an uncleaned gap in
-// the PRICE series itself) must be rejected outright, since it would
-// silently corrupt every subsequent day through the multiplicative return
-// chain. A NaN in y_pred (a single missing MODEL PREDICTION) is a much
-// milder problem and is handled gracefully -- it just can't clear either
-// threshold, so that one day safely falls through to HOLD.
+// 7k. NaN in y_actual must be rejected (it would corrupt the return chain);
+// NaN in y_pred just fails both thresholds and falls through to HOLD.
 caught = %f;
 try
     run_backtest([100; %nan; 110], [%nan; 105; 108], 0.5, -0.5, 1000);
@@ -594,13 +548,8 @@ check(~isnan(bt_gap.strategy_final) & ~isinf(bt_gap.strategy_final), ..
       "run_backtest: a NaN in y_pred for a single day (a missing prediction) degrades gracefully " + ..
       "to a HOLD that day, rather than crashing or corrupting the rest of the run");
 
-// 7l. Edge case: extreme volatility -- huge day-to-day swings (+100%,
-// -75%, +500%, -93%, +1150%, -94%) must not produce Inf/NaN or an
-// out-of-range drawdown, even though the intermediate multiplicative
-// products get very large and very small along the way. This is a
-// robustness/stress check (does it stay finite and sane), not a precision
-// check -- exact-arithmetic verification is already covered by 7g/7h above
-// on more modest numbers.
+// 7l. Extreme swings (+100%, -75%, +500%, ...) must stay finite with a sane
+// drawdown. A robustness check, not a precision check (7g/7h cover precision).
 actual_wild = [100; 200; 50; 300; 20; 250; 15];
 pred_wild   = [%nan; 150; 300; 75; 450; 30; 375];   // always 50%% above prior actual -> always BUY
 bt_wild = run_backtest(actual_wild, pred_wild, 0.5, -0.5, 1000);
@@ -622,11 +571,8 @@ check(size(wf_lr.fold_rmse, 1) == 3, "walk_forward_validate (LR): one RMSE per f
 check(~isnan(wf_lr.mean_rmse) & wf_lr.mean_rmse > 0, ..
       "walk_forward_validate (LR): mean RMSE across folds is a sane positive number");
 
-// Rolling-window correctness, checked directly against the fold boundaries
-// themselves (not just the resulting metrics): each fold's test window
-// must start exactly where the previous fold's test window ended (no gap,
-// no overlap), and the folds together must cover all the way to the end
-// of the usable data.
+// Fold boundaries: each test window starts where the previous one ended
+// (no gap/overlap) and the folds reach the end of the data.
 for f = 2:3
     check(wf_lr.fold_train_end(f) == wf_lr.fold_test_end(f-1), ..
           "walk_forward_validate (LR): fold " + string(f) + " training window ends exactly " + ..
@@ -642,12 +588,8 @@ for f = 1:3
           "walk_forward_validate (LR): fold " + string(f) + " has a non-empty test window");
 end
 
-// Independent recomputation of fold 1's RMSE -- reproduces the same
-// slice/scale/fit/evaluate sequence walk_forward_validate performs
-// internally, but written independently here (not by calling any of its
-// internals), so a real bug in its own arithmetic (wrong slice, leaking
-// scaling params across folds, etc.) would show up as a mismatch rather
-// than being invisible to a "the number came back positive" check.
+// Independent recomputation of fold 1's RMSE, written without calling the
+// function's internals, so an arithmetic bug cannot hide.
 feat_wf = build_lr_features(data);
 train_end_1 = wf_lr.fold_train_end(1); test_end_1 = wf_lr.fold_test_end(1);
 Xtr1 = feat_wf.X_raw(1:train_end_1, :); ytr1 = feat_wf.y(1:train_end_1);
@@ -669,18 +611,9 @@ check(~isnan(wf_ar.mean_rmse) & wf_ar.mean_rmse > 0, ..
 check(wf_ar.fold_test_end($) == wf_ar.n_total, ..
       "walk_forward_validate (AR): the last fold test window also reaches the end of the usable data");
 
-// 8a. Verification against a KNOWN, analytically-expected result (not just
-// an independent recomputation of the same formula, as fold 1 above was):
-// a perfectly linear, noise-free synthetic price series has an EXACT
-// linear relationship between today's close and tomorrow's close
-// (target = close + 2 every single day), which is exactly the kind of
-// pattern a LINEAR model can reconstruct with zero error using nothing
-// more than the Close feature itself. So both LR and AR are expected,
-// analytically, to fit every single fold essentially perfectly -- RMSE
-// near 0 and R^2 near 1 -- regardless of fold position. If the reported
-// metrics *didn't* come out this way, that would point to a real bug
-// (e.g. scaling parameters leaking across folds in some corrupting way,
-// or a slicing error), not just "the model isn't very good".
+// 8a. Known-truth check: a noise-free linear series (target = close + 2) is
+// reproducible exactly by a linear model, so RMSE ~ 0 and R^2 ~ 1 in every fold.
+// Anything else would point to leakage or a slicing bug.
 n_linear = 100;
 idx_lin = (1:n_linear)';
 linear_close = 100 + 2*idx_lin;   // perfectly linear, zero noise
@@ -706,8 +639,7 @@ check(wf_linear_ar.mean_r2 > 0.999999, ..
 // ---------------------------------------------------------------------------
 // Test 9: minimum-length boundary checks (build_lr_features / fit_ar_model)
 // ---------------------------------------------------------------------------
-// Exactly at the boundary (n=30 -> 20 valid LR rows / 20 AR samples with
-// p=10) must succeed, not error.
+// Exactly at the boundary (n=30 -> 20 LR rows / 20 AR samples at p=10) must succeed.
 n_boundary = 30;
 boundary_data = struct();
 boundary_data.close = 100 + (1:n_boundary)';
@@ -774,15 +706,8 @@ catch
 end
 check(caught, "fit_exponential_smoothing: beta=-0.1 (out of the valid [0,1] range) is rejected");
 
-// -- known-result check: a perfectly linear, noise-free series (the same
-// analytic-truth fixture used for LR/AR in Test 8a). Holt's method locks
-// onto the true level/trend after its very first forecast in this
-// noiseless case (see the derivation in the comment above
-// fit_exponential_smoothing's block in model_engine.sce), for ANY alpha in
-// (0,1] and beta in [0,1] -- so RMSE should be ~0 and R^2 ~1 here too,
-// regardless of the specific alpha/beta chosen. This is a genuine
-// independent verification against a known truth, not just a "did it
-// crash" check. --
+// Known-result check: on a noise-free linear series Holt locks onto the true
+// level/trend after its first forecast, so RMSE ~ 0 for any alpha, beta.
 es_linear = fit_exponential_smoothing(linear_data, 0.8, ES_ALPHA_T, ES_BETA_T);
 es_linear_eval = evaluate_es_model(es_linear);
 check(es_linear_eval.rmse < 1e-6, ..
@@ -833,6 +758,309 @@ check(abs(hF(3) - 14) < 1e-10, "holt_recursion: fcst(3) matches the hand-compute
 check(abs(hL(3) - 14.5) < 1e-10 & abs(hT(3) - 2.25) < 1e-10, ..
       "holt_recursion: L(3)/T(3) match the hand-computed values exactly");
 
+
+// ===========================================================================
+// V2 tests: common evaluation window, baseline, comparison, rigor
+// ===========================================================================
+function d = make_data_from_close(c)
+    // Minimal valid data struct from a close-price column.
+    n = size(c, 1);
+    d = struct();
+    d.close = c; d.open = c; d.high = c + 1; d.low = c - 1; d.volume = 1000 * ones(n, 1);
+    d.dates = repmat("", n, 1);
+    for i = 1:n; d.dates(i) = make_date(2024, i - 1); end
+    d.n = n; d.warnings = repmat("", 0, 1);
+endfunction
+
+
+function c = wiggle_series(n)
+    // Deterministic pseudo-random-walk-like series (no RNG, reproducible).
+    c = zeros(n, 1); c(1) = 100;
+    for i = 2:n
+        c(i) = c(i-1) + 0.8 * sin(i * 1.7) + 0.5 * cos(i * 0.37) + 0.05;
+    end
+endfunction
+
+AR_P = 10; ES_A = 0.3; ES_B = 0.1;
+real_data = load_dataset("sample_data/tech_growth_stock.csv");
+nR = real_data.n;
+split_cal = round(nR * 0.8);
+
+// ---------------------------------------------------------------------------
+// Test 10: data-quality counters, ordering and train/test row counts
+// ---------------------------------------------------------------------------
+q = real_data.quality;
+check(q.rows == nR & q.raw_rows == nR & q.dropped == 0 & q.missing == 0 & q.duplicates == 0, ..
+      "quality: clean bundled file reports 0 dropped, 0 missing, 0 duplicates");
+check(q.was_chronological, "quality: bundled file is reported as chronological");
+
+mess = make_valid_csv_lines(40);
+mess(5) = "2024-01-05,,106,104,105,1050";            // missing Open
+mess(9) = "2024-01-09,110,100,108,109,1090";         // High < Low
+write_csv(TMP + "mess_q.csv", mess);
+dm = load_dataset(TMP + "mess_q.csv");
+check(dm.quality.missing == 1 & dm.quality.invalid_ohlc == 1 & dm.quality.dropped == 2 & dm.n == 38, ..
+      "quality: 1 missing-value row and 1 impossible-OHLC row are counted separately and dropped");
+
+rev = make_valid_csv_lines(40);
+rev = [rev(1); rev($:-1:2)];
+write_csv(TMP + "reversed_q.csv", rev);
+dr = load_dataset(TMP + "reversed_q.csv");
+check(~dr.quality.was_chronological & and(dr.close(2:$) > dr.close(1:$-1)), ..
+      "quality: a newest-first file is flagged non-chronological and sorted ascending");
+
+dq = data_quality_summary(real_data, 0.8);
+check(dq.train_rows + dq.test_rows == nR & dq.train_rows == split_cal, ..
+      "quality: train + test rows add up to the dataset size");
+check(dq.train_last == real_data.dates(split_cal) & dq.test_first == real_data.dates(split_cal + 1), ..
+      "quality: train ends and test starts on consecutive dates (no overlap)");
+
+// ---------------------------------------------------------------------------
+// Test 11: every model uses the SAME test window
+// ---------------------------------------------------------------------------
+keys = ["NAIVE", "LR", "AR", "ES"];
+runs = list();
+for i = 1:4
+    runs($+1) = run_model(real_data, keys(i), split_cal, AR_P, ES_A, ES_B);
+end
+want_true = real_data.close(split_cal+1:nR);
+for i = 1:4
+    check(and(runs(i).test_idx == (split_cal+1:nR)') & runs(i).n_test == nR - split_cal, ..
+          keys(i) + ": test window is rows split+1..n (identical for all models)");
+    check(max(abs(runs(i).y_true - want_true)) < 1e-9, keys(i) + ": targets equal the actual test closes");
+    check(max(abs(runs(i).y_prev - real_data.close(split_cal:nR-1))) < 1e-9, ..
+          keys(i) + ": previous-close vector is the close one day before each target");
+    check(size(runs(i).y_pred, 1) == size(runs(i).y_true, 1) & ~or(isnan(runs(i).y_pred)) & ~or(isinf(runs(i).y_pred)), ..
+          keys(i) + ": prediction dimensions match the test window and are finite");
+end
+check(runs(2).n_train == split_cal - 10 & runs(2).model.split_idx + 10 == split_cal, ..
+      "LR: training samples = training rows minus the 10-row feature warm-up");
+check(runs(3).n_train == split_cal - AR_P, "AR: training samples = training rows - lookback");
+
+// ---------------------------------------------------------------------------
+// Test 12: no look-ahead -- changing FUTURE prices cannot change earlier forecasts
+// ---------------------------------------------------------------------------
+k = split_cal + 25;                                    // perturb everything after row k
+pert = real_data;
+pert.close(k+1:$) = pert.close(k+1:$) * 1.7;
+pert.open(k+1:$) = pert.open(k+1:$) * 1.7; pert.high(k+1:$) = pert.high(k+1:$) * 1.7;
+pert.low(k+1:$) = pert.low(k+1:$) * 1.7;
+for i = 1:4
+    a = run_model(real_data, keys(i), split_cal, AR_P, ES_A, ES_B);
+    b = run_model(pert, keys(i), split_cal, AR_P, ES_A, ES_B);
+    m_ = k - split_cal;                                  // forecasts for targets split+1..k
+    check(max(abs(a.y_pred(1:m_) - b.y_pred(1:m_))) < 1e-9, ..
+          keys(i) + ": forecasts for days <= k are unchanged when prices after k change (no look-ahead)");
+end
+
+// Truncated data (what each walk-forward fold sees) gives the same forecasts.
+cut_d = slice_data(real_data, k);
+for i = 1:4
+    a = run_model(real_data, keys(i), split_cal, AR_P, ES_A, ES_B);
+    b = run_model(cut_d, keys(i), split_cal, AR_P, ES_A, ES_B);
+    check(max(abs(a.y_pred(1:k-split_cal) - b.y_pred)) < 1e-9, ..
+          keys(i) + ": a model that never sees rows after k predicts identically up to k");
+end
+
+// LR scaling comes from training rows only: perturbing TEST features leaves mu/sigma alone.
+mA = run_model(real_data, "LR", split_cal, AR_P, ES_A, ES_B).model;
+mB = run_model(pert, "LR", split_cal, AR_P, ES_A, ES_B).model;
+check(max(abs(mA.mu - mB.mu)) < 1e-9 & max(abs(mA.sigma - mB.sigma)) < 1e-9 & max(abs(mA.beta - mB.beta)) < 1e-9, ..
+      "LR: scaling parameters and coefficients are unaffected by test-period prices");
+
+// ---------------------------------------------------------------------------
+// Test 13: compute_metrics and directional accuracy (known values)
+// ---------------------------------------------------------------------------
+mm = compute_metrics([11; 9; 11; 9], [12; 8; 9; 11], [10; 10; 10; 10]);
+check(abs(mm.dir_acc - 50) < 1e-9, "dir_acc: 2 of 4 directions right = 50%");
+check(abs(mm.rmse - sqrt(mean([1 1 4 4]))) < 1e-12 & abs(mm.mae - 1.5) < 1e-12, "metrics: RMSE/MAE match hand values");
+mm0 = compute_metrics([10; 11; 12], [10; 11; 12], [9; 10; 11]);
+check(mm0.rmse == 0 & abs(mm0.dir_acc - 100) < 1e-9 & abs(mm0.r2 - 1) < 1e-12, "metrics: perfect forecast -> RMSE 0, R^2 1, direction 100%");
+mz = compute_metrics([0; 5; 10], [1; 5; 9], [1; 0; 5]);
+check(~isnan(mz.mape) & ~isinf(mz.mape), "zero-price protection: a zero actual price is excluded from MAPE (no Inf)");
+mn = compute_metrics([10; 12; 11], [9; 10; 12], [9; 10; 12]);
+check(isnan(mn.dir_acc), "dir_acc: a forecast that never moves from the previous close has no direction score");
+
+// ---------------------------------------------------------------------------
+// Test 14: zero/negative prices and constant series
+// ---------------------------------------------------------------------------
+zero_lines = make_valid_csv_lines(40);
+zero_lines(7) = "2024-01-07,0,0,0,0,100";
+write_csv(TMP + "zero_price.csv", zero_lines);
+dz = load_dataset(TMP + "zero_price.csv");
+check(dz.n == 39 & min(dz.close) > 0 & dz.quality.invalid_ohlc == 1, "zero-price protection: a zero-price row is dropped on load and counted");
+
+caught = %f;
+try
+    run_backtest([100; 0; 100], [100; 100; 100], 0.5, -0.5, 1000, 0, 0);
+catch
+    caught = %t;
+end
+check(caught, "zero-price protection: run_backtest rejects a zero price");
+
+const_d = make_data_from_close(100 * ones(120, 1));
+for i = 1:4
+    rc = run_model(const_d, keys(i), 96, AR_P, ES_A, ES_B);
+    check((~isnan(rc.metrics.rmse) & ~isinf(rc.metrics.rmse)) & rc.metrics.rmse < 1e-9 & ~or(isnan(rc.y_pred)), ..
+          keys(i) + ": constant series runs without NaN/Inf and is predicted exactly");
+end
+
+// ---------------------------------------------------------------------------
+// Test 15: naive baseline
+// ---------------------------------------------------------------------------
+rn = runs(1);
+check(max(abs(rn.y_pred - real_data.close(split_cal:nR-1))) < 1e-12, "naive: forecast for day t is the close of day t-1");
+chg = real_data.close(split_cal+1:nR) - real_data.close(split_cal:nR-1);
+check(abs(rn.metrics.rmse - sqrt(mean(chg.^2))) < 1e-9, "naive: RMSE equals the RMS of one-day price changes on the same window");
+check(abs(rn.next_price - real_data.close(nR)) < 1e-12, "naive: next-day forecast is the last close");
+lin = make_data_from_close((100:2:218)');          // +2 per day
+rl = run_model(lin, "NAIVE", 48, AR_P, ES_A, ES_B);
+check(abs(rl.metrics.rmse - 2) < 1e-9, "naive: on a +2/day series the RMSE is exactly 2");
+rlr = run_model(lin, "LR", 48, AR_P, ES_A, ES_B);
+check(rlr.metrics.rmse < rl.metrics.rmse, "baseline check: LR beats naive on a trending series (as it should)");
+
+// ---------------------------------------------------------------------------
+// Test 16: model comparison and ranking come from the actual numbers
+// ---------------------------------------------------------------------------
+cmp = compare_models(real_data, 0.8, AR_P, ES_A, ES_B, 5);
+check(size(cmp.M, 1) == 4 & size(cmp.M, 2) == 8 & size(cmp.results) == 4, "comparison: 4 models x 8 metrics");
+check(and(~isnan(cmp.M(:, [1 2 3 4 6 7]))), "comparison: RMSE/MAE/MAPE/R^2/WF metrics are filled for every model");
+for i = 1:4
+    check(abs(cmp.M(i, 1) - runs(i).metrics.rmse) < 1e-12, cmp.labels(i) + ": comparison RMSE equals the stand-alone run_model RMSE (same window)");
+end
+check(isnan(cmp.M(1, 5)) & and(~isnan(cmp.M(2:4, 5))), "comparison: naive has no direction accuracy, the three models do");
+check(gsort(cmp.rank.order, "g", "i")' == 1:4, "ranking: order is a permutation of the four models");
+check(cmp.rank.best_idx >= 2 & cmp.rank.best_idx <= 4, "ranking: the best StockVision model is one of LR/AR/ES");
+
+Mfake = [10 8 5 50 %nan 12 9 %nan; 4 3 2 90 60 5 4 55; 6 5 3 80 55 7 6 52; 7 6 4 70 52 8 7 50];
+rk = rank_models(Mfake, ["Naive"; "LR"; "AR"; "ES"]);
+check(rk.order(1) == 2 & rk.best_idx == 2, "ranking: a model that is best on every metric ranks first");
+check(rk.skill_rmse(2) > 0 & rk.naive_rank_pos == 4, "ranking: model beating naive has positive skill; naive ranks last");
+Mfake2 = [1 1 1 99 %nan 1 1 %nan; 2 2 2 90 50 2 2 50; 3 3 3 80 52 3 3 51; 4 4 4 70 54 4 4 52];
+rk2 = rank_models(Mfake2, ["Naive"; "LR"; "AR"; "ES"]);
+check(rk2.order(1) == 1 & rk2.skill_rmse(2) < 0 & rk2.best_idx == 2, ..
+      "ranking: when naive wins it ranks first and every model gets NEGATIVE skill (reported honestly)");
+txt = format_ranking(cmp);
+check(or(strindex(strcat(txt, " "), "Best StockVision model") <> []), "ranking text names the best model");
+
+// ---------------------------------------------------------------------------
+// Test 17: walk-forward (multi-fold, chronological, no leakage)
+// ---------------------------------------------------------------------------
+wf = cmp.wf;
+check(wf.n_used == 5 & wf.n_req == 5 & wf.reason == "", "walk-forward: 5 folds used when the data supports them");
+check(and(wf.train_end(2:$) == wf.test_end(1:$-1)) & wf.test_end($) == nR & wf.train_end(1) == wf.min_train, ..
+      "walk-forward: folds are contiguous, non-overlapping and reach the last row");
+check(and(wf.train_end < wf.test_end), "walk-forward: every fold trains strictly before it tests");
+check(abs(wf.mean_rmse(2) - mean(wf.fold_rmse(:, 2))) < 1e-12, "walk-forward: mean RMSE is the mean of the fold RMSEs");
+
+// Independent fold-1 check for the naive model (pure arithmetic on prices).
+te1 = wf.train_end(1)+1:wf.test_end(1);
+nv = real_data.close(te1) - real_data.close(te1 - 1);
+check(abs(wf.fold_rmse(1, 1) - sqrt(mean(nv.^2))) < 1e-9, "walk-forward: fold-1 naive RMSE matches an independent recomputation");
+
+// Future changes after the last-but-one fold cannot alter earlier folds.
+kk = wf.test_end(4);
+pert2 = real_data; pert2.close(kk+1:$) = pert2.close(kk+1:$) * 2; pert2.open(kk+1:$) = pert2.open(kk+1:$) * 2;
+pert2.high(kk+1:$) = pert2.high(kk+1:$) * 2; pert2.low(kk+1:$) = pert2.low(kk+1:$) * 2;
+wfp = walk_forward_all(pert2, 5, AR_P, ES_A, ES_B);
+check(max(abs(wfp.fold_rmse(1:4, :) - wf.fold_rmse(1:4, :))) < 1e-9, "walk-forward: folds 1-4 are unchanged by changes to later (fold 5) data");
+
+// Too little data: fold count is reduced with a stated reason; tiny data errors.
+small = slice_data(real_data, 75);
+wfs = walk_forward_all(small, 5, AR_P, ES_A, ES_B);
+check(wfs.n_used < 5 & wfs.n_used >= 1 & wfs.reason <> "", "walk-forward: too little data reduces the fold count and says why");
+caught = %f;
+try
+    walk_forward_all(slice_data(real_data, 45), 5, AR_P, ES_A, ES_B);
+catch
+    caught = %t;
+end
+check(caught, "walk-forward: a dataset too small for even one fold is rejected, never faked");
+
+// ---------------------------------------------------------------------------
+// Test 18: backtest rigor -- lag, costs, slippage, buy & hold, trades
+// ---------------------------------------------------------------------------
+// Signal on day 2 (forecast +5% vs day 1) trades at close of day 2 (price 100);
+// only the day 3 and day 4 returns (+10% each) are earned.
+ya = [100; 100; 110; 121]; yp = [100; 105; 110; 121];
+b0 = run_backtest(ya, yp, 0.5, -0.5, 100000, 0, 0);
+check(abs(b0.strategy_final - 100000 * 1.21) < 1e-6, "execution lag: a day-2 BUY earns only the day-3/day-4 returns");
+check(abs(b0.position(2) - 1) < 1e-12 & b0.n_trades == 1, "execution lag: position is held from the close of day 2");
+b1 = run_backtest(ya, yp, 0.5, -0.5, 100000, 1, 0.5);
+check(abs(b1.strategy_final - 100000 * (1 - 0.015) * 1.21) < 1e-6, "costs: 1% cost + 0.5% slippage deduct exactly 1.5% on the BUY");
+check(b1.strategy_final < b0.strategy_final, "costs: costs lower the ending capital");
+
+// Round trip with a known net-of-cost trade return.
+ya2 = [100; 100; 110; 121; 121]; yp2 = [100; 105; 110; 121; 90];
+b2 = run_backtest(ya2, yp2, 0.5, -0.5, 1000, 1, 0);
+check(b2.n_completed_trades == 1 & b2.n_trades == 2, "trades: one BUY + one SELL = one completed round trip");
+check(abs(b2.trade_gross(1) - 0.21) < 1e-12 & abs(b2.trade_net(1) - (1.21 * 0.99^2 - 1)) < 1e-12, "trades: net return deducts entry and exit cost");
+check(b2.n_wins == 1 & b2.n_losses == 0 & abs(b2.win_rate_pct - 100) < 1e-12, "trades: winning/losing counts and win rate");
+
+// Buy & hold uses the same evaluation window.
+y_t = runs(2).y_true; y_p = runs(2).y_pred;
+bb = run_backtest(y_t, y_p, 0.5, -0.5, 100000, 0, 0);
+check(size(bb.buyhold_value, 1) == size(y_t, 1) & size(bb.strategy_value, 1) == size(y_t, 1), "buy & hold: curve covers exactly the strategy evaluation window");
+check(abs(bb.buyhold_final - 100000 * y_t($) / y_t(1)) < 1e-6, "buy & hold: ending capital = start * last/first test close");
+bc = run_backtest(y_t, y_p, 0.5, -0.5, 100000, 0.2, 0.1);
+check(abs(bc.buyhold_final - 100000 * 0.997 * y_t($) / y_t(1)) < 1e-6, "buy & hold: pays one entry cost under the same cost assumptions");
+
+// Drawdown and Sharpe against independent calculations.
+sv = bb.strategy_value; run_pk = sv(1); mdd = 0;
+for i = 1:size(sv, 1); if sv(i) > run_pk then run_pk = sv(i); end; mdd = max(mdd, (run_pk - sv(i)) / run_pk * 100); end
+check(abs(bb.max_drawdown_pct - mdd) < 1e-9, "drawdown: matches an independent peak-to-trough calculation");
+dr_ = sv(2:$) ./ sv(1:$-1) - 1;
+if stdev(dr_) > 1e-12 then
+    check(abs(bb.sharpe_ratio - mean(dr_) / stdev(dr_) * sqrt(252)) < 1e-9, "Sharpe: matches mean/std*sqrt(252) of daily returns");
+else
+    check(isnan(bb.sharpe_ratio), "Sharpe: undefined when returns have zero variance");
+end
+check(bb.n_days == size(y_t, 1) - 1 & ~isnan(bb.annualized_return_pct), "annualized return is reported when >= 30 days exist");
+bshort = run_backtest(y_t(1:10), y_p(1:10), 0.5, -0.5, 1000, 0, 0);
+check(isnan(bshort.annualized_return_pct), "annualized return is withheld for windows shorter than 30 days");
+
+// ---------------------------------------------------------------------------
+// Test 19: report/CSV export (never overwrites; content comes from results)
+// ---------------------------------------------------------------------------
+r_sel = cmp.results(2);
+sig = generate_signal(real_data.close($), r_sel.next_price, 0.5, -0.5);
+sig.current_price = real_data.close($); sig.buy_thr = 0.5; sig.sell_thr = -0.5;
+bt_e = run_backtest(r_sel.y_true, r_sel.y_pred, 0.5, -0.5, 100000, 0.1, 0.05);
+cfg = struct("split_ratio", 0.8, "ar_lookback", AR_P, "es_alpha", ES_A, "es_beta", ES_B, "n_folds", 5, ..
+             "buy", 0.5, "sell", -0.5, "cost", 0.1, "slip", 0.05, "capital", 100000);
+asm = struct("capital", 100000, "cost", 0.1, "slip", 0.05, "buy", 0.5, "sell", -0.5, "split_ratio", 0.8, ..
+             "n", nR, "train_first", real_data.dates(1), "train_last", dq.train_last, ..
+             "test_first", dq.test_first, "test_last", real_data.dates($), "train_rows", dq.train_rows, "test_rows", dq.test_rows);
+rep = struct("dataset_label", "Tech test", "data", real_data, "dq", dq, "cfg", cfg, "analysis", r_sel, ..
+             "naive", cmp.results(1), "signal", sig, "validated", %t, "cmp", cmp, "bt", bt_e, "assump", asm);
+out_base = TMP + "export_test";
+export_report_txt(out_base + ".txt", rep);
+rep_txt = strcat(mgetl(out_base + ".txt"), "|");
+check(isfile(out_base + ".txt") & strindex(rep_txt, "WALK-FORWARD VALIDATION") <> [] & strindex(rep_txt, "BACKTEST ASSUMPTIONS") <> [] & ..
+      strindex(rep_txt, "MODEL RANKING") <> [] & strindex(rep_txt, "Buy & Hold") <> [] & strindex(rep_txt, "Generated:") <> [], ..
+      "export: TXT report contains comparison, ranking, walk-forward, assumptions, buy & hold and a timestamp");
+written = export_companion_csvs(out_base, rep);
+check(size(written, 1) == 4 & and(isfile(written)), "export: predictions, comparison, walk-forward and backtest CSVs are written");
+written2 = export_companion_csvs(out_base, rep);
+check(and(written2 <> written) & and(isfile(written)), "export: a second export gets new file names and never overwrites the first");
+export_results_csv(out_base + "_single.csv", rep);
+csvl = mgetl(out_base + "_single.csv");
+check(csvl(1) == "Metric,Value" & or(part(csvl, 1:5) == "RMSE,"), "export: single-file CSV keeps the Metric,Value layout");
+check(or(part(csvl, 1:19) == "Backtest_Slippage_p") & or(part(csvl, 1:22) == "Backtest_Transaction_C"), "export: CSV records transaction cost and slippage");
+
+// build_report_struct (shared by the sample generator and the exports)
+rep2 = build_report_struct("Tech test", real_data, cfg, "AR", %t);
+check(rep2.analysis.label == "AR" & typeof(rep2.bt) == "st" & rep2.cmp.wf.n_used == 5 & rep2.assump.test_rows == nR - split_cal, ..
+      "build_report_struct: runs comparison, walk-forward and backtest for the chosen model");
+rep3 = build_report_struct("Tech test", real_data, cfg, "ES", %f);
+check(~(typeof(rep3.bt) == "st"), "build_report_struct: no backtest when not requested");
+
+// Model-info text is technically precise.
+info_ar = strcat(model_info_text("AR", 10, 0.3, 0.1), " ");
+check(strindex(info_ar, "NOT an LSTM") <> [], "model info: AR text states it is not an LSTM");
+
 mprintf("\n========================================\n");
 mprintf("ALL MODEL ENGINE TESTS PASSED\n");
 mprintf("========================================\n");
+
+exit;

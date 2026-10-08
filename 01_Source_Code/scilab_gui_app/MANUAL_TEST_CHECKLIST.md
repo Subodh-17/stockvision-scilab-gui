@@ -1,139 +1,88 @@
-# Manual GUI test checklist
+# StockVision manual test checklist (integrated dashboard)
 
-Everything in `model_engine.sce` (the actual math, including the new
-Exponential Smoothing model) is covered by the 171-assertion headless test
-suite in `test_model_engine.sce`, which runs with no display and is re-run
-on every change. It cannot, by its nature, click a button -- GUI callback
-wiring needs a real window. This checklist is the fast, systematic way to
-cover that remaining piece: about 6 minutes, covering all six main actions
-in one pass through the app.
+Run from this folder in Scilab: `exec("gui_app.sce", -1);`
+Recommended window: about 1500 x 980 px (the window shrinks to the screen; text panels then scroll).
 
-Run `scilab -f gui_app.sce`, then work through the boxes in order (each
-step assumes the previous ones were completed):
+Automated coverage that does **not** replace this list:
+`test_model_engine.sce` (engine, no display needed) and `test_gui_workflow.sce` (drives the real
+GUI callbacks; needs a display, e.g. `xvfb-run -a scilab -nw -nb -f test_gui_workflow.sce`).
 
-## 1. Startup
-- [ ] Window opens at roughly 1050x900, nothing overlapping, all labels
-      readable
-- [ ] "Tech Growth Stock (synthetic demo data)" is pre-selected (data is
-      loaded automatically, but no chart yet -- that only appears once you
-      click Run Analysis, in its own separate window, see below)
-- [ ] Status bar shows something like "Loaded 300 rows..."
-- [ ] The Model dropdown shows "Linear Regression" selected, with "AR
-      Time-Series (autoregressive)" and "Exponential Smoothing (Holt)" as
-      the other two options
-- [ ] The right-hand panel says "Charts open in separate windows..."
+## A. Launch and single-window rule
+- [ ] The app opens **one** figure window with title band, left controls, and panels for price chart,
+      info (Data Quality / Assumptions tabs), model results, comparison + ranking, comparison chart,
+      equity curve, backtest summary and walk-forward.
+- [ ] Charts/results panels show "No analysis yet" / "No comparison yet" / "No backtest yet".
+- [ ] Run Backtest and Export Results are greyed out; Run Analysis, Compare Models, Walk Forward are enabled.
+- [ ] Status bar reads "Ready. ..."; no popup appeared.
 
-## 2. Run Analysis
-- [ ] Click **Run Analysis** with the defaults (Linear Regression, 80/20
-      split). A **separate chart window** opens (actual vs. predicted,
-      with gridlines), and the Results panel in the MAIN window fills in:
-      Dataset, Model, RMSE, MAE, MAPE, R², **Prediction Accuracy %**,
-      current/predicted price, the "rough band... NOT a true prediction
-      interval" line, and a SIGNAL
-- [ ] A colour-coded **BUY / SELL / HOLD** indicator appears next to the
-      "Results" label (green for BUY, red for SELL, grey for HOLD) --
-      matches the SIGNAL text in the Results panel below it
-- [ ] **Critically: the main window (buttons, dropdowns, sliders) is still
-      fully visible and clickable** -- nothing should have closed,
-      cleared, or become unresponsive
-- [ ] Switch the Model dropdown to **AR Time-Series**, click Run Analysis
-      again -- numbers change, the SAME chart window updates (doesn't open
-      a new one each time), main window still fine
-- [ ] Switch the Model dropdown to **Exponential Smoothing (Holt)**, click
-      Run Analysis again -- numbers change again (typically smoother,
-      lower-variance predictions than LR/AR since this model only tracks a
-      running level/trend, no raw-price lookback), signal indicator updates,
-      chart title mentions "Exp. Smoothing" and the alpha/beta used
-- [ ] Drag the **Train/Test Split** slider -- label updates live, status
-      bar says "Split changed -- click Run Analysis to refit", and Results
-      panel resets to the placeholder (confirms the stale-model
-      invalidation works)
-- [ ] Click Run Analysis again to refit at the new split
-- [ ] Toggle **Show 20-day moving average** -- chart redraws immediately
-      with a third line, *no* need to click Run Analysis again
-- [ ] Change the **AR lookback**, **Buy/Sell thresholds**, or **Txn
-      cost/Slippage** edit boxes to something odd (e.g. letters instead of
-      a number) and click Run Analysis -- it should fall back to the
-      previous default and visibly rewrite the box, not error out
-- [ ] Close the Run Analysis chart window (its own X button, not the main
-      window's) -- **the main window stays open and fully usable**. Click
-      Run Analysis again -- a fresh chart window opens without issue
+## B. Data quality
+- [ ] Info panel, *Data Quality* tab: rows, date range, missing values, duplicate dates,
+      chronological order, invalid OHLC rows, training rows, testing rows (numbers match the dataset).
+- [ ] Move the split slider: training/testing rows change immediately; any earlier results are cleared.
+- [ ] File > Load Custom CSV > `sample_data/messy_demo_data_quality.csv`: Chronological order = NO (sorted on load),
+      Invalid OHLC rows = 1, "1 rows dropped on load" (118 rows kept of 120).
+- [ ] A CSV with a wrong header or a duplicate date shows an error dialog and the app stays usable.
 
-## 3. Compare
-- [ ] Click **Compare** -- a **new chart window** opens with two bar
-      charts side by side: single-split RMSE and 3-fold walk-forward mean
-      RMSE, one bar each for LR / AR / Exponential Smoothing
-- [ ] The Results panel in the MAIN window (not a popup) now shows the
-      same LR/AR/ES metrics as text -- RMSE/MAE/MAPE/R² plus the
-      walk-forward mean for each of the three models
-- [ ] **No popup/dialog appears** -- Compare no longer interrupts the
-      session; both the chart window and the main window are usable
-      immediately
+## C. Single-model analysis (repeat for each model)
+- [ ] Choose Linear Regression, AR Time-Series, Exponential Smoothing; click **Run Analysis**.
+- [ ] Status shows "Training ...", "Updating dashboard...", then "Analysis complete." (green).
+- [ ] Main chart (inside the main window) shows training context, actual, predicted, 20-day MA,
+      train/test divider and the next-day forecast marker; the colour key above it matches.
+- [ ] Model Results lists model, prediction, current close, signal, test RMSE, MAE, MAPE, R^2, direction accuracy,
+      naive RMSE and the "beats / does NOT beat naive" verdict, train/test samples, model status (READY).
+- [ ] Toggle "Show 20-day moving average": the MA line appears/disappears without re-running.
+- [ ] Changing the model clears results (status says so) and disables Run Backtest / Export.
 
-## 4. Run Backtest
-- [ ] Click **Run Backtest** -- a *second* chart window opens (strategy vs.
-      buy & hold, with gridlines), and the Results panel in the MAIN
-      window (not a popup) shows trades made, strategy/buy&hold final
-      value and return %, max drawdown, volatility, Sharpe ratio, win rate
-- [ ] **No popup/dialog appears** for a successful backtest -- results
-      land directly in the Results panel
-- [ ] Set **Txn cost** to something nonzero (e.g. `1`), click Run Backtest
-      again -- the strategy's final value should be visibly lower than the
-      zero-cost run
-- [ ] Close the Run Analysis chart window (the X on that window, not the
-      main one) -- **the main app window and the backtest window both stay
-      open**. Same test the other way: close the backtest chart window,
-      main window and analysis chart are unaffected. Closing a chart
-      window must never close the application.
+## D. Compare Models and ranking
+- [ ] Click **Compare Models**. Table shows Naive, LR, AR, ES for RMSE, MAE, MAPE, R^2, direction accuracy,
+      walk-forward RMSE/MAE; best value per row is green with `*`.
+- [ ] Ranking lists mean ranks, the best StockVision model with a reason, RMSE vs naive, and a plain
+      statement when no model beats the naive baseline.
+- [ ] Bar chart shows test-window RMSE and walk-forward mean RMSE per model, inside the main window.
+- [ ] Model Status becomes VALIDATED once walk-forward has run.
 
-## 5. Export
-- [ ] Click **Export**, type a filename ending in `.csv`, save -- open it
-      in a text editor or spreadsheet: should have a `Metric,Value` block
-      (including `Dataset`, and every number the Results panel showed)
-      followed by an `Index,Actual,Predicted` table, and (since you ran a
-      backtest above) a set of `Backtest_*` rows
-- [ ] Click Export again, save as `.pdf` this time -- opens as a real PDF
-      showing the current chart
-- [ ] Click Export once more, save as `.txt` -- plain-text version of the
-      Results panel + last backtest summary
-- [ ] Repeat one Export (any format) with **Exponential Smoothing**
-      selected as the model -- confirms export isn't hardcoded to LR/AR
+## E. Walk-forward validation
+- [ ] Click **Walk Forward Validation**: one row per fold with test-row range and RMSE per model, plus
+      mean RMSE, mean MAE, mean direction accuracy.
+- [ ] Load `messy_demo_data_quality.csv` (118 rows), set folds to 10, click Walk Forward Validation: the panel says 7 folds were used and why.
+- [ ] Set folds to 3 and 6: the fold count in the panel follows.
 
-## 6. Reset
-- [ ] Click **Reset** -- the three chart windows (if open) clear, Results
-      panel goes back to the placeholder, the colour-coded signal
-      indicator clears, threshold/lookback/cost boxes go back to their
-      defaults (0.5 / -0.5 / 10 / 0 / 0)
-- [ ] **The main window itself is untouched** -- still fully visible,
-      every button/dropdown/slider still there and clickable, not reset to
-      blank or closed
-- [ ] Run a full Run Analysis again right after Reset, without restarting
-      Scilab -- confirms one session supports multiple analyses back to
-      back
+## F. Backtest vs buy and hold
+- [ ] Run Analysis, then **Run Backtest**; the Info panel switches to *Assumptions*.
+- [ ] Summary strip and panel show starting/ending capital, total and annualized return, max drawdown,
+      volatility, Sharpe, trades, winning/losing, win rate, strategy vs buy and hold, same test period.
+- [ ] Equity chart shows both curves and BUY/SELL markers.
+- [ ] Change transaction cost or slippage: the backtest is cleared and the assumptions panel updates;
+      re-running with higher costs lowers the ending capital.
+- [ ] Enter `abc` as a threshold: red status-bar message, no crash, no popup.
 
-## 7. Load Custom CSV
-- [ ] File > Load Custom CSV..., pick any bundled file from `sample_data/`
-      (or your own, matching the `Date,Open,High,Low,Close,Volume` format)
-      -- loads, dropdown gains/updates a "Custom: ..." entry, model
-      invalidated (same as changing the split)
-- [ ] Try loading an obviously bad file (e.g. rename a `.txt` file to
-      `.csv`, or a spreadsheet export with the wrong columns) -- should
-      show a friendly error popup, not a raw Scilab console error
+## G. Export
+- [ ] **Export Results** > `.txt`: report with data quality, parameters, results, comparison, ranking,
+      walk-forward, assumptions, backtest, timestamp, plus `_predictions.csv`, `_comparison.csv`,
+      `_walkforward.csv`, `_backtest.csv` next to it.
+- [ ] Exporting twice to the same name creates `_2` files; nothing is overwritten.
+- [ ] `.csv` gives the single Metric,Value table; `.pdf` gives the three charts only (no text panels or colour key).
 
-## 8. Full cycle, repeated -- without restarting Scilab
-This is the single most important check given this app's history: **one
-Scilab session must support the entire workflow multiple times over**,
-with the main window surviving every step.
-- [ ] Pick a dataset -> Run Analysis (LR) -> Run Backtest -> Compare ->
-      Export (any format) -> switch to AR -> Run Analysis again -> Run
-      Backtest again -> switch to Exponential Smoothing -> Run Analysis a
-      third time -> close all three chart windows -> pick a *different*
-      dataset -> Run Analysis a fourth time
-- [ ] At every step above, the main window (buttons, dropdowns, sliders,
-      Results panel) stayed open, responsive, and showed the right data --
-      never needed a restart, never went blank, never closed unexpectedly
+## H. Reset, Model Info, stale state
+- [ ] **Model Info** opens a dialog describing the selected model (assumptions, limitations; AR states it is not an LSTM).
+- [ ] **Reset** restores dataset, model, split 80/20, lookback 10, folds 5, thresholds, costs and clears all panels.
+- [ ] After any of: dataset change, split change, lookback change -> all results cleared.
+      Fold change -> comparison cleared only. Cost/threshold change -> backtest cleared only.
 
-## If something breaks
-Note the **exact** error text (or screenshot the popup) and which step it
-happened on -- that's a real bug in the GUI wiring, not a documentation gap,
-and the fastest way to get it fixed.
+## I. Capturing the required screenshots (if repeating by hand)
+Use a window of about 1500 x 980 and the Tech Growth dataset unless stated. Capture the whole window.
+
+| File | Steps |
+|---|---|
+| 01_Main_GUI.png | Launch; capture before clicking anything. |
+| 02_Data_Quality.png | File > Load Custom CSV > `messy_demo_data_quality.csv`; Data Quality tab. |
+| 03_Linear_Regression_Integrated.png | Reset; model = Linear Regression; Run Analysis. |
+| 04_AR_Time_Series_Integrated.png | Model = AR Time-Series; Run Analysis. |
+| 05_Exponential_Smoothing_Integrated.png | Model = Exponential Smoothing; Run Analysis. |
+| 06_Model_Comparison_Integrated.png | Reset; Compare Models. |
+| 07_Backtest_Integrated.png | Reset; Run Analysis; Run Backtest. |
+| 08_Walk_Forward_Validation.png | Reset; dataset = Volatile; folds = 6; Walk Forward Validation. |
+| 09_Final_Dashboard.png | Reset; Run Analysis; Compare Models; Run Backtest. |
+
+The committed screenshots were produced automatically with `tools/capture_screens.sce` on a virtual display
+(Scilab 2024.0.0, Linux). `xs2png` does not capture uicontrols, so a screen capture is required.
