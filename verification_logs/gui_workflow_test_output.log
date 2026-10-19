@@ -1,0 +1,49 @@
+OK   : launch: dataset loaded, no analysis yet
+OK   : launch: Run Backtest and Export disabled until an analysis exists
+OK   : launch: Run/Compare/Walk-forward enabled
+OK   : launch: results panel shows the No-analysis-yet state
+OK   : launch: exactly ONE graphics window exists (found 1)
+OK   : model 1: changing model clears the previous analysis
+OK   : model 1: Run Analysis -> Linear Regression
+OK   : model 1: main chart drawn inside the main figure
+OK   : model 2: changing model clears the previous analysis
+OK   : model 2: Run Analysis -> AR(10)
+OK   : model 2: main chart drawn inside the main figure
+OK   : model 3: changing model clears the previous analysis
+OK   : model 3: Run Analysis -> Exp. Smoothing (a=0.3, b=0.1)
+OK   : model 3: main chart drawn inside the main figure
+OK   : after 3 analyses: still exactly one window
+OK   : after analysis: Run Backtest and Export enabled
+OK   : Compare Models: 4-model comparison filled
+OK   : Compare Models: comparison chart drawn in the main figure
+OK   : Walk Forward: 5 folds used
+OK   : Run Backtest: equity chart drawn inside the main figure
+OK   : Run Backtest: buy & hold covers the same test window and pays the entry cost
+OK   : after backtest: still exactly one window
+OK   : info tabs: Interpretation tab activates and bolds correctly
+OK   : info tabs: Interpretation tab contains full quantitative commentary
+OK   : info tabs: Assumptions tab activates and bolds correctly
+OK   : info tabs: Data Quality tab activates and bolds correctly
+OK   : split change clears analysis, comparison and backtest
+OK   : split change: results panel back to No-analysis-yet
+OK   : split change: data-quality train/test rows follow the slider (210/90)
+OK   : dataset change clears everything
+OK   : dataset change: Blue Chip loaded
+OK   : AR lookback change clears results
+OK   : cost change clears only the backtest
+OK   : fold-count change clears only the comparison
+OK   : invalid threshold -> clear status-bar error, no popup
+OK   : invalid lookback -> clear status-bar error
+OK   : Export: TXT written; a second export does not overwrite the first
+OK   : Export: companion CSV tables written
+OK   : Export: single CSV written
+OK   : Export: charts PDF written
+OK   : after exports: still exactly one window
+[Model Info] EXPONENTIAL SMOOTHING (HOLT LINEAR TREND) /   / Purpose: /   Track a smoothed price level and trend; forecast one step /   ahead as level + trend. /   / Level: smoothed price estimate, update weight alpha = 0.3 / Trend: smoothed daily change, update weight beta = 0.1 / One-step forecasting: the forecast for day t uses only the state /   built from days before t, then the state is updated. / Parameters: alpha and beta are FIXED defaults, not fitted to the /   data (so nothing is tuned on the test period, but they are /   also not optimal for any particular series). /   / Limitations: /   - fixed alpha/beta; a poor choice lags or over-reacts /   - extrapolates the recent trend; weak at turning points /   - uses no volume or other features /   / Evaluation protocol (all models): /   - chronological split, never shuffled; same test window for all /   - scaling/fit parameters come from training rows only /   - the forecast for day t uses data up to day t-1 only /   - a naive last-value baseline is always reported alongside
+OK   : Model Info callback runs
+OK   : Reset: defaults restored and results cleared
+OK   : Reset: Run Backtest / Export disabled again
+[Dataset error] CSV error: failed to load [TMPDIR/bad.csv] -- CSV error: column 6 is labeled [Vol], expected [Volume]. Columns must appear in the order Date,Open,High,Low,Close,Volume. -- if this message does not look like one of the load_dataset_impl validation errors, it is an unexpected internal error; please report the exact text above.
+OK   : bad CSV: load fails cleanly with an error, no crash
+
+GUI VERIFICATION: 0 failure(s)

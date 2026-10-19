@@ -50,8 +50,8 @@ app_state.signal = [];
 app_state.cmp = [];          // compare_models result (all models + walk-forward)
 app_state.bt = [];           // run_backtest result for the analysed model
 app_state.show_ma = %t;
-app_state.info_tab = "dq";   // top-right panel: "dq" or "asm"
-app_state.info_dq = ""; app_state.info_asm = "";
+app_state.info_tab = "dq";   // top-right panel: "dq", "asm" or "interp"
+app_state.info_dq = ""; app_state.info_asm = ""; app_state.info_interp = "";
 
 // Palette
 GUI_BG = [0.93 0.94 0.95];
@@ -282,7 +282,7 @@ function s = main_key_html(show_ma)
     s = "<html>&nbsp;" + key_span("#8290a8", "&#9472; Training close") + "&nbsp;&nbsp; " + key_span("#000000", "&#9472; Actual (test)") + ..
         "&nbsp;&nbsp; " + key_span("#d22828", "- - Predicted");
     if show_ma then s = s + "&nbsp;&nbsp; " + key_span("#2850dc", "-.- 20-day MA"); end
-    s = s + "&nbsp;&nbsp; " + key_span("#e08a00", "&#9670; Next-day forecast") + "&nbsp;&nbsp; " + key_span("#555555", "&#124; train/test split") + "</html>";
+    s = s + "&nbsp;&nbsp; " + key_span("#e08a00", "&#9670; Next forecast (95% PI)") + "&nbsp;&nbsp; " + key_span("#555555", "&#124; train/test split") + "</html>";
 endfunction
 
 
@@ -302,6 +302,9 @@ function draw_main_chart()
     vis_lo = max(1, r.split_cal - r.n_test + 1);
     hist_x = (vis_lo:r.split_cal)'; hist_y = d.close(vis_lo:r.split_cal);
     vis_vals = [hist_y; r.y_true; r.y_pred; r.next_price];
+    if isfield(r, "interval_low") & isfield(r, "interval_high") then
+        vis_vals = [vis_vals; r.interval_low; r.interval_high];
+    end
     pad = 0.08 * (max(vis_vals) - min(vis_vals) + 1e-9);
     ylo = min(vis_vals) - pad; yhi = max(vis_vals) + pad;
     labels = [];   // legend labels in creation order
@@ -318,6 +321,11 @@ function draw_main_chart()
         ma = moving_average(r.y_true, 20, r.ma_history);
         plot(r.test_idx, ma); style_last([40 80 220], 2, 4);
         labels = [labels, "20d MA"];
+    end
+    if isfield(r, "interval_low") & isfield(r, "interval_high") then
+        plot([n + 1, n + 1], [r.interval_low, r.interval_high]);
+        style_last([220 140 0], 2, 1);
+        labels = [labels, "95% PI"];
     end
     plot(n + 1, r.next_price, "d");
     e = gce(); e.children(1).mark_background = color(255, 170, 0);
@@ -425,15 +433,18 @@ endfunction
 
 
 function show_info_tab(name)
-    // Top-right panel shows either the data-quality block or the assumptions.
+    // Top-right panel shows data quality, assumptions, or research interpretation.
     global gui app_state
     app_state.info_tab = name;
     if name == "asm" then
         set_list(gui.lb_info, app_state.info_asm);
-        set(gui.tab_asm, "fontweight", "bold"); set(gui.tab_dq, "fontweight", "normal");
+        set(gui.tab_asm, "fontweight", "bold"); set(gui.tab_dq, "fontweight", "normal"); set(gui.tab_interp, "fontweight", "normal");
+    elseif name == "interp" then
+        set_list(gui.lb_info, app_state.info_interp);
+        set(gui.tab_interp, "fontweight", "bold"); set(gui.tab_dq, "fontweight", "normal"); set(gui.tab_asm, "fontweight", "normal");
     else
         set_list(gui.lb_info, app_state.info_dq);
-        set(gui.tab_dq, "fontweight", "bold"); set(gui.tab_asm, "fontweight", "normal");
+        set(gui.tab_dq, "fontweight", "bold"); set(gui.tab_asm, "fontweight", "normal"); set(gui.tab_interp, "fontweight", "normal");
     end
 endfunction
 
@@ -465,6 +476,17 @@ function refresh_assumptions()
     if ~has(app_state.data) then return; end
     app_state.info_asm = format_assumptions(current_assumptions());
     if app_state.info_tab == "asm" then show_info_tab("asm"); end
+endfunction
+
+
+function refresh_interpretation()
+    global gui app_state
+    if ~has(app_state.data) then
+        app_state.info_interp = ["No dataset loaded."];
+    else
+        app_state.info_interp = format_analytical_interpretation(app_state.cmp, app_state.analysis, app_state.dq, app_state.bt);
+    end
+    if app_state.info_tab == "interp" then show_info_tab("interp"); end
 endfunction
 
 
@@ -507,7 +529,7 @@ endfunction
 
 function refresh_all()
     global gui
-    refresh_dq(); refresh_assumptions(); refresh_results(); refresh_comparison(); refresh_backtest();
+    refresh_dq(); refresh_assumptions(); refresh_interpretation(); refresh_results(); refresh_comparison(); refresh_backtest();
     gui.fig.immediate_drawing = "off";
     draw_main_chart(); draw_comparison_chart(); draw_equity_chart();
     gui.fig.immediate_drawing = "on";
@@ -849,10 +871,12 @@ endfunction
 
 
 function on_about()
-    show_dialog("About StockVision", ["StockVision -- stock analysis & prediction dashboard (Scilab)."; ..
+    show_dialog("About StockVision V3", ["StockVision V3 -- Quantitative Research & Forecasting Terminal (Scilab)."; ..
         "Linear Regression, AR and Holt exponential smoothing vs a naive baseline,"; ..
-        "walk-forward validation and a backtest vs buy & hold."; " "; ..
-        "Educational tool, not financial advice. Bundled data is synthetic."], "info");
+        "walk-forward validation and an illustrative backtest vs buy & hold."; " "; ..
+        "Features: Data-quality anomaly flags, exact 95% OLS prediction intervals,"; ..
+        "and dynamic quantitative research interpretation."; " "; ..
+        "Educational research tool, not financial advice. Bundled data is synthetic."], "info");
 endfunction
 
 
@@ -961,7 +985,7 @@ endfunction
 // --- figure -----------------------------------------------------------------
 scr = get(0, "screensize_px");
 fig_w = min(1500, scr(3) - 20); fig_h = min(980, scr(4) - 60);
-gui.fig = figure("figure_name", "StockVision -- Stock Analysis & Prediction (Scilab)", ..
+gui.fig = figure("figure_name", "StockVision V3 -- Quantitative Research & Forecasting Terminal (Scilab)", ..
                  "position", [5, 5, fig_w, fig_h], "dockable", "off");
 gui.fig.background = color(236, 238, 241);
 toolbar(gui.fig.figure_id, "off");
@@ -982,12 +1006,12 @@ uimenu(m_help, "label", "Model Info", "callback", "on_model_info()");
 uimenu(m_help, "label", "About", "callback", "on_about()");
 
 // --- title band ---------------------------------------------------------------
-gui.title = uicontrol(gui.fig, "style", "text", "string", "  STOCKVISION", "units", "normalized", ..
-    "position", [0 0.946 0.20 0.054], "backgroundcolor", GUI_HEAD, "foregroundcolor", [1 1 1], ..
+gui.title = uicontrol(gui.fig, "style", "text", "string", "  STOCKVISION V3", "units", "normalized", ..
+    "position", [0 0.946 0.22 0.054], "backgroundcolor", GUI_HEAD, "foregroundcolor", [1 1 1], ..
     "fontsize", 22, "fontweight", "bold", "horizontalalignment", "left");
 gui.subtitle = uicontrol(gui.fig, "style", "text", "units", "normalized", ..
-    "string", "Stock analysis & prediction dashboard  |  Linear Regression, AR and Exponential Smoothing vs a naive baseline  |  built with Scilab", ..
-    "position", [0.20 0.946 0.80 0.054], "backgroundcolor", GUI_HEAD, "foregroundcolor", [0.85 0.9 1], ..
+    "string", "Quantitative Research & Forecasting Terminal  |  Linear Regression, AR and Exponential Smoothing vs naive baseline  |  built with Scilab", ..
+    "position", [0.22 0.946 0.78 0.054], "backgroundcolor", GUI_HEAD, "foregroundcolor", [0.85 0.9 1], ..
     "fontsize", 12, "horizontalalignment", "left");
 
 // --- left column: controls ------------------------------------------------------
@@ -1053,7 +1077,7 @@ function ph = mk_placeholder(x, y, w, hh)
 endfunction
 
 
-// Row A: main chart + info panel (data quality / assumptions tabs)
+// Row A: main chart + info panel (data quality / assumptions / interpretation tabs)
 gui.head_main = mk_head("PRICE & PREDICTION", RX, 0.658 + 0.282 - 0.024, 0.498);
 gui.key_main = uicontrol(gui.fig, "style", "text", "string", "", "units", "normalized", ..
     "position", [RX 0.658 + 0.282 - 0.024 - 0.024 0.498 0.024], "backgroundcolor", [1 1 1], "fontsize", 10, ..
@@ -1061,11 +1085,14 @@ gui.key_main = uicontrol(gui.fig, "style", "text", "string", "", "units", "norma
 gui.ax_main = make_axes(RX, 0.658, 0.498, 0.282 - 0.048);
 [gui.lb_info, gui.head_info] = mk_list_panel("INFO", 0.706, 0.658, 0.288, 0.282);
 gui.tab_dq = uicontrol(gui.fig, "style", "pushbutton", "string", "Data Quality", "units", "normalized", ..
-    "position", [0.790 0.9165 0.100 0.022], "fontsize", 10, "callback", "show_info_tab(""dq"")", ..
-    "tooltipstring", "Rows, date range, missing/duplicate/invalid rows, train/test rows");
+    "position", [0.748 0.9165 0.080 0.022], "fontsize", 10, "callback", "show_info_tab(""dq"")", ..
+    "tooltipstring", "Rows, date range, missing/duplicate/invalid rows, train/test rows, anomalies");
 gui.tab_asm = uicontrol(gui.fig, "style", "pushbutton", "string", "Assumptions", "units", "normalized", ..
-    "position", [0.892 0.9165 0.100 0.022], "fontsize", 10, "callback", "show_info_tab(""asm"")", ..
+    "position", [0.831 0.9165 0.080 0.022], "fontsize", 10, "callback", "show_info_tab(""asm"")", ..
     "tooltipstring", "Capital, costs, slippage, signal lag, position rule, periods");
+gui.tab_interp = uicontrol(gui.fig, "style", "pushbutton", "string", "Interpretation", "units", "normalized", ..
+    "position", [0.914 0.9165 0.080 0.022], "fontsize", 10, "callback", "show_info_tab(""interp"")", ..
+    "tooltipstring", "Dynamic quantitative research interpretation & statistical conclusions");
 // Row B: results + comparison/ranking + comparison chart
 [gui.lb_res, gui.head_res] = mk_list_panel("MODEL RESULTS", RX, 0.340, 0.205, 0.315);
 [gui.lb_cmp, gui.head_cmp] = mk_list_panel("MODEL COMPARISON & RANKING", 0.412, 0.340, 0.288, 0.315);

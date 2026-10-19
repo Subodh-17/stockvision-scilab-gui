@@ -1,6 +1,6 @@
 ---
 title: "StockVision - Problem Statement"
-subtitle: "Problem Statement (V2) | Scilab GUIVerse Hackathon"
+subtitle: "Problem Statement (V3) | Scilab GUIVerse Hackathon"
 ---
 
 # 1. The problem
@@ -15,10 +15,12 @@ I wanted a lightweight Scilab application in which a user can answer questions s
 
 - How does a feature-based Linear Regression compare with an autoregressive model and with Holt exponential smoothing on the **same data and the same test window**?
 - Does any of them beat a **naive "tomorrow equals today" baseline**? If not, the application should say so.
+- What is the defensible forecast uncertainty around point predictions (exact 95% prediction intervals accounting for residual variance and feature leverage)?
 - How do results change when the train/test split, the AR lookback or the number of validation folds changes?
-- Do the models hold up under **walk-forward validation** rather than a single split?
-- What happens to a model-guided signal once a one-day execution lag, transaction costs and slippage are applied, and how does it compare with **buy and hold** over the same period?
-- Is the data itself trustworthy (missing values, duplicates, ordering, impossible bars)?
+- Do the models hold up under **walk-forward validation** rather than a single split, and what is the dispersion across sequential regimes?
+- What happens to a model-guided signal once a one-day execution lag, transaction costs and slippage are applied, and how does it compare with **buy and hold** over the same period (including Calmar ratio and cumulative costs paid)?
+- Is the data itself trustworthy (missing values, duplicates, ordering, impossible bars, return spikes, zero volume)?
+- What does an automated, mathematically sound quantitative research interpretation conclude from the evidence?
 
 Normally this requires writing code, running separate experiments and comparing outputs by hand. I wanted a single interactive workflow.
 

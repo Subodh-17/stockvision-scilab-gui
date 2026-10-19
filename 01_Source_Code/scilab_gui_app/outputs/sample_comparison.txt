@@ -30,8 +30,10 @@ Fold Test rows       Naive       LR       AR       ES  (RMSE)
 5    265-300        2.2399   2.1796  2.1777*   2.7525
 -----------------------------------------------------
 Mean RMSE          2.4551*   2.5608   2.5355   3.2314
+Std Dev RMSE       0.5525*   0.7358   0.7312   1.0914
 Mean MAE           1.9725*   2.0630   2.0380   2.5220
 Mean Dir. acc.         n/a   53.9%*    51.1%    53.3%
+Note: Expanding folds share training data (nested windows; not independent).
  
 ==== Blue Chip Stock (synthetic) ====
 60 test rows, 5 WF folds; * = best in row
@@ -63,8 +65,10 @@ Fold Test rows       Naive       LR       AR       ES  (RMSE)
 5    265-300       1.7277*   1.8062   1.7726   2.7826
 -----------------------------------------------------
 Mean RMSE          1.8542*   2.0941   2.1382   2.6448
+Std Dev RMSE       0.1207*   0.4585   0.4854   0.3048
 Mean MAE           1.4727*   1.7012   1.7428   2.1459
 Mean Dir. acc.         n/a    45.6%   46.7%*    44.4%
+Note: Expanding folds share training data (nested windows; not independent).
  
 ==== Volatile Stock (synthetic) ====
 60 test rows, 5 WF folds; * = best in row
@@ -95,6 +99,8 @@ Fold Test rows       Naive       LR       AR       ES  (RMSE)
 5    265-300        5.7467   5.9307  5.6982*   8.3197
 -----------------------------------------------------
 Mean RMSE          3.7203*   4.0955   3.9121   5.1572
+Std Dev RMSE       1.4802*   1.8439   1.6361   2.4414
 Mean MAE           2.9208*   3.2552   3.0515   4.1888
 Mean Dir. acc.         n/a    45.0%   53.3%*    51.1%
+Note: Expanding folds share training data (nested windows; not independent).
  

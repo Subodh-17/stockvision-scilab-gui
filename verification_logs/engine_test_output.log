@@ -1,0 +1,299 @@
+PASS: load_dataset: sample_data/tech_growth_stock.csv loaded rows > 0
+PASS: load_dataset: close vector length matches n
+PASS: load_dataset: no NaN in close prices
+PASS: load_dataset: clean bundled file produces no warnings
+PASS: load_dataset: sample_data/blue_chip_stock.csv loaded rows > 0
+PASS: load_dataset: close vector length matches n
+PASS: load_dataset: no NaN in close prices
+PASS: load_dataset: clean bundled file produces no warnings
+PASS: load_dataset: sample_data/volatile_stock.csv loaded rows > 0
+PASS: load_dataset: close vector length matches n
+PASS: load_dataset: no NaN in close prices
+PASS: load_dataset: clean bundled file produces no warnings
+PASS: load_dataset: wrong column header is rejected with an error
+PASS: load_dataset: file with too few usable rows is rejected
+PASS: load_dataset: a completely empty file (0 bytes) is rejected, not crashed on
+PASS: load_dataset: a header-only file (zero data rows) is rejected with a clear error
+PASS: load_dataset: duplicate dates are rejected with an error
+PASS: load_dataset: descending-order file still loads all 35 rows
+PASS: load_dataset: descending-order file produces a warning
+PASS: load_dataset: descending-order file is auto-sorted back to ascending
+PASS: load_dataset: 4 bad rows dropped, 35 good rows survive
+PASS: load_dataset: dropped rows produce a warning message
+PASS: load_dataset: a CSV missing the Volume column (5 columns instead of 6) is rejected
+PASS: load_dataset: a single malformed-date row is dropped, not fatal to the whole file
+PASS: load_dataset: dropping a malformed-date row produces a warning
+PASS: load_dataset: a constant-price CSV loads cleanly (flat prices are not themselves invalid)
+PASS: fit_linear_regression: a constant-price series (every feature training std = 0) fits without NaN/Inf, thanks to the sigma==0 guard
+PASS: predict_next_lr: a constant-price series correctly predicts that same constant price
+PASS: fit_ar_model: the same constant-price series (via the full CSV pipeline this time, not a hand-built struct) also fits without NaN/Inf
+PASS: is_valid_number_string: accepts a normal decimal
+PASS: is_valid_number_string: accepts a negative integer
+PASS: is_valid_number_string: rejects two decimal points
+PASS: is_valid_number_string: rejects trailing non-numeric text
+PASS: is_valid_number_string: rejects an empty string
+PASS: parse_iso_date: accepts a valid leap-year Feb 29
+PASS: parse_iso_date: rejects Feb 29 in a non-leap year
+PASS: parse_iso_date: rejects month 13
+PASS: parse_iso_date: rejects a non-ISO date format
+PASS: build_lr_features: enough valid rows survive NaN-dropping
+PASS: build_lr_features: 12 features built
+PASS: build_lr_features: latest_raw Close feature is the TRUE most recent close (regression test for the [stale last row] next-day-prediction bug)
+PASS: fit_linear_regression: 13 coefficients (12 features + intercept)
+PASS: fit_linear_regression: mu is computed from TRAINING rows only (regression test for data leakage)
+PASS: evaluate_model (LR): RMSE in a sane range
+PASS: evaluate_model (LR): R^2 > 0.5 on trending synthetic data (sanity check)
+PASS: evaluate_model (LR): no NaN in metrics
+PASS: evaluate_model (LR): Prediction Accuracy %% is a sane 0-100 value
+PASS: evaluate_model (LR): Prediction Accuracy %% = 100 - MAPE
+PASS: predict_next_lr: predicted price is positive
+PASS: predict_next_lr: prediction within a plausible range of current price
+PASS: predict_next_lr: confidence interval brackets the point prediction
+PASS: fit_ar_model: 11 coefficients (10 lags + intercept)
+PASS: fit_ar_model: price_min/price_max computed from TRAINING data only (regression test for data leakage)
+PASS: evaluate_ar_model: RMSE > 0
+PASS: evaluate_ar_model: no NaN in metrics
+PASS: evaluate_ar_model: Prediction Accuracy %% is a sane 0-100 value
+PASS: predict_next_ar: predicted price is positive
+PASS: predict_next_ar: confidence interval brackets the point prediction
+PASS: fit_ar_model: constant price series (degenerate scaling range) does not produce NaN/Inf
+PASS: predict_next_ar: constant price series correctly predicts that same constant price
+PASS: evaluate_model: constant test target with a PERFECT trivial fit -> R^2 = 1, not NaN/crash
+PASS: evaluate_model: MAPE is well-defined when actuals are nonzero
+PASS: evaluate_model: MAPE is NaN (not Inf/crash) when every test actual price is zero
+PASS: evaluate_model: zero-variance zero-actual test set with a perfect fit -> R^2 = 1
+PASS: evaluate_model: Prediction Accuracy is NaN when MAPE is undefined
+PASS: evaluate_model: Prediction Accuracy is floored at 0%% (not negative) when MAPE exceeds 100%%
+PASS: evaluate_model: constant test target with an IMPERFECT fit -> R^2 is NaN (undefined), not a division-by-zero crash
+PASS: generate_signal: +3% change -> BUY
+PASS: generate_signal: -3% change -> SELL
+PASS: generate_signal: +0.1% change (inside band) -> HOLD
+PASS: generate_signal: exactly at +0.5% threshold -> BUY (inclusive)
+PASS: moving_average: leading NaNs before window fills (no history given)
+PASS: moving_average: MA(3) at index 3 = mean(1,2,3) = 2
+PASS: moving_average: MA(3) at last index = mean(8,9,10) = 9
+PASS: moving_average: with history, the FIRST point is no longer NaN (regression test for the [MA blank at start of test period] bug)
+PASS: moving_average: first point with history correctly uses the last 2 history values
+PASS: moving_average: later points match plain (no-history) behavior once the window is full
+PASS: cross-dataset check: sample_data/tech_growth_stock.csv LR fits without NaN
+PASS: cross-dataset check: sample_data/tech_growth_stock.csv AR fits without NaN
+PASS: cross-dataset check: sample_data/blue_chip_stock.csv LR fits without NaN
+PASS: cross-dataset check: sample_data/blue_chip_stock.csv AR fits without NaN
+PASS: cross-dataset check: sample_data/volatile_stock.csv LR fits without NaN
+PASS: cross-dataset check: sample_data/volatile_stock.csv AR fits without NaN
+PASS: fit_linear_regression: an extremely volatile synthetic series (large, rapid swings) fits without NaN/Inf
+PASS: fit_ar_model: the same extremely volatile synthetic series fits without NaN/Inf
+PASS: run_backtest: a SELL signal one day ahead of a crash avoids it entirely -- ends flat at 1000
+PASS: run_backtest: buy-and-hold takes the full crash -- ends at exactly 800
+PASS: run_backtest: strategy beats buy-and-hold when it sells one day ahead of a drop
+PASS: run_backtest: exactly 2 trades (one BUY, one SELL) in the avoidance scenario
+PASS: run_backtest: exactly 1 completed round-trip trade
+PASS: run_backtest: the one completed trade had exactly 0% P&L -- not counted as a win
+PASS: run_backtest: a same-day signal can no longer capture a return that already happened (regression test for the look-ahead/timing-bias fix)
+PASS: run_backtest: same-day-signal scenario matches the exact lagged-execution arithmetic
+PASS: run_backtest: entry lag means the strategy tracks price growth starting AFTER entry, exactly
+PASS: run_backtest: entry lag means staying invested from day 2 still slightly underperforms true buy-and-hold (which was invested from day 1)
+PASS: run_backtest: all-HOLD signals -> strategy never enters, stays flat
+PASS: run_backtest: all-HOLD signals -> zero trades
+PASS: run_backtest: buy-and-hold still moves with the (choppy) market
+PASS: run_backtest: win rate is NaN (undefined), not 0, with zero completed trades
+PASS: run_backtest: single-row input does not crash, returns starting capital unchanged
+PASS: run_backtest: single-row input -> zero trades
+PASS: run_backtest: real fitted-model backtest on bundled data produces finite results
+PASS: run_backtest: real backtest strategy value stays positive
+PASS: run_backtest: max drawdown is a sane percentage
+PASS: run_backtest: 1%% transaction cost on 2 trades matches the exact expected arithmetic
+PASS: run_backtest: transaction costs reduce the ending value versus the zero-cost run
+PASS: run_backtest: a modest transaction cost does not erase the whole crash-avoidance edge
+PASS: run_backtest: the returned struct carries the starting capital it was actually given
+PASS: run_backtest: slippage ALONE (zero transaction cost) reduces the ending value identically to an equivalent 1%% transaction cost -- confirms slippage_pct is genuinely applied, not just accepted
+PASS: run_backtest: transaction cost and slippage combine additively (0.5%%+0.5%%), matching the single-1%%-cost result exactly
+PASS: run_backtest: hand-derived strategy_value sequence matches exactly (basis for the risk-metric checks below)
+PASS: run_backtest: max drawdown matches the hand-computed peak-to-trough decline
+PASS: run_backtest: Sharpe ratio matches an independently-recomputed value from the same known returns
+PASS: run_backtest: annualized volatility matches an independently-recomputed value
+PASS: run_backtest: win-rate scenario produces exactly 3 completed round-trip trades
+PASS: run_backtest: win rate matches the hand-verified 2-wins-out-of-3 result (66.67%%)
+PASS: run_backtest: constant price series -> both strategy and buy&hold stay exactly at starting capital
+PASS: run_backtest: constant price series with 0%% predicted change every day never trades
+PASS: run_backtest: zero-variance daily returns -> Sharpe is NaN (undefined), not Inf/crash
+PASS: run_backtest: constant price series has exactly 0%% volatility
+PASS: run_backtest: constant price series has exactly 0%% drawdown
+PASS: run_backtest: 2-row input does not crash and produces a finite result
+PASS: run_backtest: 2-row input can open a position but cannot complete a round trip yet
+PASS: run_backtest: 2-row input has too few points for Sharpe/win-rate -- NaN, not a crash
+PASS: run_backtest: a NaN in y_actual (e.g. an uncleaned data gap) is rejected with a clear error instead of silently corrupting every later day
+PASS: run_backtest: a NaN in y_pred for a single day (a missing prediction) degrades gracefully to a HOLD that day, rather than crashing or corrupting the rest of the run
+PASS: run_backtest: extreme alternating price swings stay finite and positive (no NaN/Inf blowup)
+PASS: run_backtest: max drawdown stays within [0,100] even under extreme volatility
+PASS: run_backtest: Sharpe ratio under extreme volatility is either a finite number or NaN, never Inf
+PASS: run_backtest: annualized volatility under extreme swings is a large but finite number
+PASS: walk_forward_validate (LR): runs the requested number of folds
+PASS: walk_forward_validate (LR): one RMSE per fold
+PASS: walk_forward_validate (LR): mean RMSE across folds is a sane positive number
+PASS: walk_forward_validate (LR): fold 2 training window ends exactly where fold 1 test window ended -- sequential, non-overlapping folds
+PASS: walk_forward_validate (LR): fold 3 training window ends exactly where fold 2 test window ended -- sequential, non-overlapping folds
+PASS: walk_forward_validate (LR): the last fold test window reaches the end of the usable data (the remainder-absorption rule)
+PASS: walk_forward_validate (LR): the first fold training window is exactly the computed min_train
+PASS: walk_forward_validate (LR): fold 1 has a non-empty test window
+PASS: walk_forward_validate (LR): fold 2 has a non-empty test window
+PASS: walk_forward_validate (LR): fold 3 has a non-empty test window
+PASS: walk_forward_validate (LR): fold 1 RMSE matches an independently-recomputed value (same slice/scale/fit sequence, computed separately right here in the test)
+PASS: walk_forward_validate (AR): runs the requested number of folds
+PASS: walk_forward_validate (AR): mean RMSE across folds is a sane positive number
+PASS: walk_forward_validate (AR): the last fold test window also reaches the end of the usable data
+PASS: walk_forward_validate (LR): a perfectly linear, noise-free price series is fit essentially exactly in every fold (RMSE ~ 0) -- verified against a KNOWN, analytically-expected result
+PASS: walk_forward_validate (LR): R^2 is essentially 1 on the same noise-free linear series
+PASS: walk_forward_validate (AR): the same perfectly linear series is also fit essentially exactly
+PASS: walk_forward_validate (AR): R^2 is essentially 1 for AR on the same noise-free series too
+PASS: build_lr_features: exactly-at-minimum dataset yields exactly 20 valid rows
+PASS: fit_ar_model: exactly-at-minimum dataset fits without error
+PASS: build_lr_features: one row under the minimum is rejected with an error
+PASS: fit_exponential_smoothing: RMSE on bundled data is a sane non-negative number
+PASS: fit_exponential_smoothing: test-set length matches n - split_idx
+PASS: predict_next_es: next-day forecast is a sane positive price
+PASS: predict_next_es: point forecast falls inside its own uncertainty band
+PASS: fit_exponential_smoothing: alpha=0 (out of the valid (0,1] range) is rejected
+PASS: fit_exponential_smoothing: alpha=1.5 (out of the valid (0,1] range) is rejected
+PASS: fit_exponential_smoothing: beta=-0.1 (out of the valid [0,1] range) is rejected
+PASS: fit_exponential_smoothing: a perfectly linear, noise-free price series is fit essentially exactly (RMSE ~ 0) -- verified against a KNOWN, analytically-expected result
+PASS: fit_exponential_smoothing: R^2 is essentially 1 on the same noise-free linear series
+PASS: predict_next_es: next-day forecast on the noise-free linear series matches the analytically-known next value exactly
+PASS: walk_forward_validate_es: runs the requested number of folds
+PASS: walk_forward_validate_es: mean RMSE across folds is a sane non-negative number
+PASS: walk_forward_validate_es: the last fold test window reaches the end of the usable data
+PASS: walk_forward_validate_es: fold 2 training window ends exactly where fold 1 test window ended -- sequential, non-overlapping folds
+PASS: walk_forward_validate_es: fold 3 training window ends exactly where fold 2 test window ended -- sequential, non-overlapping folds
+PASS: walk_forward_validate_es: the noise-free linear series is fit essentially exactly in every fold too (RMSE ~ 0)
+PASS: holt_recursion: initial level/trend seed matches close(1) and close(2)-close(1) exactly
+PASS: holt_recursion: fcst(2) matches the hand-computed value exactly
+PASS: holt_recursion: L(2)/T(2) match the hand-computed values exactly
+PASS: holt_recursion: fcst(3) matches the hand-computed value exactly
+PASS: holt_recursion: L(3)/T(3) match the hand-computed values exactly
+PASS: quality: clean bundled file reports 0 dropped, 0 missing, 0 duplicates
+PASS: quality: bundled file is reported as chronological
+PASS: quality: 1 missing-value row and 1 impossible-OHLC row are counted separately and dropped
+PASS: quality: a newest-first file is flagged non-chronological and sorted ascending
+PASS: quality: train + test rows add up to the dataset size
+PASS: quality: train ends and test starts on consecutive dates (no overlap)
+PASS: NAIVE: test window is rows split+1..n (identical for all models)
+PASS: NAIVE: targets equal the actual test closes
+PASS: NAIVE: previous-close vector is the close one day before each target
+PASS: NAIVE: prediction dimensions match the test window and are finite
+PASS: LR: test window is rows split+1..n (identical for all models)
+PASS: LR: targets equal the actual test closes
+PASS: LR: previous-close vector is the close one day before each target
+PASS: LR: prediction dimensions match the test window and are finite
+PASS: AR: test window is rows split+1..n (identical for all models)
+PASS: AR: targets equal the actual test closes
+PASS: AR: previous-close vector is the close one day before each target
+PASS: AR: prediction dimensions match the test window and are finite
+PASS: ES: test window is rows split+1..n (identical for all models)
+PASS: ES: targets equal the actual test closes
+PASS: ES: previous-close vector is the close one day before each target
+PASS: ES: prediction dimensions match the test window and are finite
+PASS: LR: training samples = training rows minus the 10-row feature warm-up
+PASS: AR: training samples = training rows - lookback
+PASS: NAIVE: forecasts for days <= k are unchanged when prices after k change (no look-ahead)
+PASS: LR: forecasts for days <= k are unchanged when prices after k change (no look-ahead)
+PASS: AR: forecasts for days <= k are unchanged when prices after k change (no look-ahead)
+PASS: ES: forecasts for days <= k are unchanged when prices after k change (no look-ahead)
+PASS: NAIVE: a model that never sees rows after k predicts identically up to k
+PASS: LR: a model that never sees rows after k predicts identically up to k
+PASS: AR: a model that never sees rows after k predicts identically up to k
+PASS: ES: a model that never sees rows after k predicts identically up to k
+PASS: LR: scaling parameters and coefficients are unaffected by test-period prices
+PASS: dir_acc: 2 of 4 directions right = 50%
+PASS: metrics: RMSE/MAE match hand values
+PASS: metrics: perfect forecast -> RMSE 0, R^2 1, direction 100%
+PASS: zero-price protection: a zero actual price is excluded from MAPE (no Inf)
+PASS: dir_acc: a forecast that never moves from the previous close has no direction score
+PASS: zero-price protection: a zero-price row is dropped on load and counted
+PASS: zero-price protection: run_backtest rejects a zero price
+PASS: NAIVE: constant series runs without NaN/Inf and is predicted exactly
+PASS: LR: constant series runs without NaN/Inf and is predicted exactly
+PASS: AR: constant series runs without NaN/Inf and is predicted exactly
+PASS: ES: constant series runs without NaN/Inf and is predicted exactly
+PASS: naive: forecast for day t is the close of day t-1
+PASS: naive: RMSE equals the RMS of one-day price changes on the same window
+PASS: naive: next-day forecast is the last close
+PASS: naive: on a +2/day series the RMSE is exactly 2
+PASS: baseline check: LR beats naive on a trending series (as it should)
+PASS: comparison: 4 models x 8 metrics
+PASS: comparison: RMSE/MAE/MAPE/R^2/WF metrics are filled for every model
+PASS: Naive: comparison RMSE equals the stand-alone run_model RMSE (same window)
+PASS: LR: comparison RMSE equals the stand-alone run_model RMSE (same window)
+PASS: AR: comparison RMSE equals the stand-alone run_model RMSE (same window)
+PASS: ES: comparison RMSE equals the stand-alone run_model RMSE (same window)
+PASS: comparison: naive has no direction accuracy, the three models do
+PASS: ranking: order is a permutation of the four models
+PASS: ranking: the best StockVision model is one of LR/AR/ES
+PASS: ranking: a model that is best on every metric ranks first
+PASS: ranking: model beating naive has positive skill; naive ranks last
+PASS: ranking: when naive wins it ranks first and every model gets NEGATIVE skill (reported honestly)
+PASS: ranking text names the best model
+PASS: walk-forward: 5 folds used when the data supports them
+PASS: walk-forward: folds are contiguous, non-overlapping and reach the last row
+PASS: walk-forward: every fold trains strictly before it tests
+PASS: walk-forward: mean RMSE is the mean of the fold RMSEs
+PASS: walk-forward: fold-1 naive RMSE matches an independent recomputation
+PASS: walk-forward: folds 1-4 are unchanged by changes to later (fold 5) data
+PASS: walk-forward: too little data reduces the fold count and says why
+PASS: walk-forward: a dataset too small for even one fold is rejected, never faked
+PASS: execution lag: a day-2 BUY earns only the day-3/day-4 returns
+PASS: execution lag: position is held from the close of day 2
+PASS: costs: 1% cost + 0.5% slippage deduct exactly 1.5% on the BUY
+PASS: costs: costs lower the ending capital
+PASS: trades: one BUY + one SELL = one completed round trip
+PASS: trades: net return deducts entry and exit cost
+PASS: trades: winning/losing counts and win rate
+PASS: buy & hold: curve covers exactly the strategy evaluation window
+PASS: buy & hold: ending capital = start * last/first test close
+PASS: buy & hold: pays one entry cost under the same cost assumptions
+PASS: drawdown: matches an independent peak-to-trough calculation
+PASS: Sharpe: matches mean/std*sqrt(252) of daily returns
+PASS: annualized return is reported when >= 30 days exist
+PASS: annualized return is withheld for windows shorter than 30 days
+PASS: export: TXT report contains comparison, ranking, walk-forward, assumptions, buy & hold and a timestamp
+PASS: export: predictions, comparison, walk-forward and backtest CSVs are written
+PASS: export: a second export gets new file names and never overwrites the first
+PASS: export: single-file CSV keeps the Metric,Value layout
+PASS: export: CSV records transaction cost and slippage
+PASS: build_report_struct: runs comparison, walk-forward and backtest for the chosen model
+PASS: build_report_struct: no backtest when not requested
+PASS: model info: AR text states it is not an LSTM
+PASS: V3 data quality: anomaly flags detected non-fatally
+PASS: V3 data quality: >50% daily return spike flagged
+PASS: V3 data quality: zero volume row flagged
+PASS: V3 data quality summary: retains anomaly count
+PASS: V3 metrics: explicit n_eval and n_dir_scored tracked
+PASS: V3 intervals: LR next-day forecast includes prediction interval
+PASS: V3 intervals: point prediction strictly inside 95% interval
+PASS: V3 intervals: positive non-zero interval width
+PASS: V3 intervals: AR next-day forecast includes prediction interval
+PASS: V3 intervals: AR prediction inside 95% interval
+PASS: V3 intervals: ES next-day forecast includes prediction interval
+PASS: V3 intervals: ES prediction inside 95% interval
+PASS: V3 ranking: primary ranking metric documented
+PASS: V3 ranking: tie-break rule documented
+PASS: V3 walk-forward: fold RMSE standard deviation reported
+PASS: V3 walk-forward: fold dispersion is non-negative and finite
+PASS: V3 walk-forward: total evaluated observations counted
+PASS: V3 backtest: market exposure percentage tracked
+PASS: V3 backtest: cumulative transaction costs paid tracked
+PASS: V3 backtest: buy & hold entry cost paid tracked
+PASS: V3 backtest: Calmar ratio and profit factor computed
+PASS: V3 interpretation: dynamic research section generated
+PASS: V3 interpretation: header present
+PASS: V3 interpretation: benchmark ranking discussed
+PASS: V3 interpretation: naive baseline compared
+PASS: V3 interpretation: directional accuracy evaluated
+PASS: V3 interpretation: methodological caveats and disclaimer present
+PASS: V3 determinism: run_model produces bit-for-bit identical predictions
+PASS: V3 determinism: next-day forecast is perfectly deterministic
+PASS: V3 determinism: backtest equity curves are bit-for-bit reproducible
+PASS: V3 determinism: cumulative costs paid is deterministic
+
+========================================
+ALL MODEL ENGINE TESTS PASSED
+========================================

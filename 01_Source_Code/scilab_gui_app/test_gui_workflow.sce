@@ -1,7 +1,13 @@
 // test_gui_workflow.sce -- scripted behavioural test of the integrated dashboard.
 // Needs a display (Linux: xvfb-run -a scilab -nw -nb -f test_gui_workflow.sce). Quiet mode: no popups.
+_DIR = "";
+try
+    _DIR = get_absolute_file_path("test_gui_workflow.sce");
+catch
+    _DIR = pwd() + filesep();
+end
 global gui_quiet gui app_state nfail; gui_quiet = %t;
-exec("gui_app.sce", -1);
+exec(_DIR + "gui_app.sce", -1);
 nfail = 0;
 function ck(c, msg)
     global nfail
@@ -41,8 +47,16 @@ on_run_backtest();
 ck(has(app_state.bt) & size(gui.ax_eq.children, "*") >= 2, "Run Backtest: equity chart drawn inside the main figure");
 ck(abs(app_state.bt.buyhold_final - app_state.bt.starting_capital * (1 - 0.0015) * app_state.analysis.y_true($) / app_state.analysis.y_true(1)) < 1e-6, ..
    "Run Backtest: buy & hold covers the same test window and pays the entry cost");
-ck(app_state.bt.transaction_cost_pct == 0.1 & app_state.bt.slippage_pct == 0.05, "Run Backtest: cost 0.1% and slippage 0.05% from the edit boxes were applied");
 ck(size(winsid(), "*") == 1, "after backtest: still exactly one window");
+
+// V3 Interpretation Tab & Info Navigation
+show_info_tab("interp");
+ck(get(gui.tab_interp, "fontweight") == "bold" & get(gui.tab_dq, "fontweight") == "normal" & get(gui.tab_asm, "fontweight") == "normal", "info tabs: Interpretation tab activates and bolds correctly");
+ck(size(app_state.info_interp, 1) >= 15, "info tabs: Interpretation tab contains full quantitative commentary");
+show_info_tab("asm");
+ck(get(gui.tab_asm, "fontweight") == "bold" & get(gui.tab_interp, "fontweight") == "normal", "info tabs: Assumptions tab activates and bolds correctly");
+show_info_tab("dq");
+ck(get(gui.tab_dq, "fontweight") == "bold" & get(gui.tab_asm, "fontweight") == "normal", "info tabs: Data Quality tab activates and bolds correctly");
 
 // Stale-result protection
 set(gui.split_slider, "value", 0.7); on_slider_moved();

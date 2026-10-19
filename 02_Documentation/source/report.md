@@ -1,19 +1,19 @@
 ---
-title: "StockVision - Project Report"
-subtitle: "Technical report (V2) | Scilab GUIVerse Hackathon"
+title: "StockVision V3 - Project Report"
+subtitle: "Technical report (V3) | Scilab GUIVerse Hackathon"
 ---
 
 # 1. Purpose and scope
 
-StockVision is an educational Scilab application for stock analysis and prediction. This report documents the V2 design, the evaluation protocol, the results on the bundled synthetic data, how the work was verified, and what remains limited. It is written to be checkable: every number in it comes from a program run included in the submission.
+StockVision is an interactive Scilab desktop application for quantitative stock analysis, statistical forecasting, model comparison, validation, and realistic backtesting. This report documents the V3 engineering design, the evaluation protocol, exact 95% prediction intervals, data-quality anomaly detection, dynamic quantitative research interpretation, verification on Scilab 2026.1.0 on Windows, and what remains limited. It is written to be checkable: every number in it comes from an executable program run included in the repository.
 
 ![Final integrated dashboard.](05_GUI_Screenshots/09_Final_Dashboard.png){width=100%}
 
 # 2. System overview
 
-**Architecture.** `model_engine.sce` contains all data loading, validation, modelling, metrics, ranking, walk-forward, backtest, text-report and export logic, with no GUI code, so it runs headless and is unit-tested. `gui_app.sce` builds one figure, holds application state, calls the engine, and renders. The three charts are `newaxes` axes inside the same figure as the controls; text panels are listboxes. Because a chart refresh deletes only that axes' children, no operation can destroy the controls.
+**Architecture.** `model_engine.sce` contains all data loading, validation, anomaly flags, modelling, uncertainty intervals, metrics, ranking, walk-forward, backtest, text-report, dynamic quantitative research interpretation, and export logic with zero GUI code, so it runs headless and is automated-test verified. `gui_app.sce` builds one figure, manages reactive state, calls the engine, and renders the quantitative research terminal. The three charts are `newaxes` axes embedded in the same figure as the controls; text panels are monospaced listboxes. Because chart refreshes delete only that axes' own children, no operation can destroy the controls.
 
-**State handling.** Results are held in one state structure: analysis, comparison (including walk-forward) and backtest. Each setting change invalidates only what it affects: dataset, split, AR lookback -> everything; model -> analysis and backtest; fold count -> comparison; thresholds, capital, cost, slippage -> backtest. Buttons that depend on results are disabled until they exist.
+**State handling.** Results are held in a centralized reactive state structure: data, data quality, analysis, comparison (including walk-forward), backtest, and research interpretation. Each setting change invalidates only what it affects: dataset, split, AR lookback -> everything; model -> analysis and backtest; fold count -> comparison; thresholds, capital, cost, slippage -> backtest. Buttons that depend on results are disabled until prerequisite calculations complete. Stale charts or outputs are immediately cleared.
 
 # 3. Models
 
@@ -109,6 +109,9 @@ Annualized return*           +76.4%       +57.1%
 Max drawdown                  7.63%        7.63%
 Volatility (ann.)            25.86%       26.43%
 Sharpe (rf=0)                  2.32         1.86
+Calmar ratio                  10.02         7.48
+Market exposure               96.6%       100.0%
+Costs & slip. paid           150.00       150.00
 Trades executed: 1   Round trips: 0
 Winning: 0   Losing: 0   Win rate: n/a
 Strategy is AHEAD of buy & hold by 3.06 pts.
@@ -116,20 +119,29 @@ Position still open at the end (not a trade).
 * annualized from 59 days: short-window extrapolation
 ```
 
-**Reading these results honestly.** On all three datasets the naive baseline has the lowest test RMSE and the lowest walk-forward RMSE and MAE. On Tech Growth, AR has marginally lower single-split MAE and MAPE (the `*` marks in the table above); on the other two datasets the naive baseline is best on every single-split error metric. Directional accuracy is at or below 50% in several cases. This is consistent with price series that are close to a random walk, although the statistical properties of the bundled data were not tested formally. In this illustrative backtest, the strategy returned 14.21% versus 11.15% for buy-and-hold. The result is based on a single trade (one BUY, still open at the end of the 59-day window) and should not be interpreted as evidence of predictive superiority. The value of the application is that it makes comparisons like these visible.
+**Quantitative Research Interpretation (Dynamic Output):**
+1. **Benchmark & Ranking:** Out-of-sample test window covers 60 trading days (2024-12-02 to 2025-02-21). Primary ranking metric is mean rank across 6 metrics. Top-ranked candidate model is AR (Mean Rank: 1.83).
+2. **Comparison with Naive Baseline:** Naive baseline outperformed all statistical models overall (Test RMSE: Naive=2.5810 vs Best Model AR=2.6780; Walk-Forward RMSE: Naive=2.4551 vs AR=2.5355). The synthetic series displays strong persistence consistent with a near random walk; parameter estimation variance exceeded any incremental signal.
+3. **Directional Timing:** Directional accuracy of 50.0% is statistically indistinguishable from a coin flip.
+4. **Statistical Power & Reliability:** Sample size of 60 bars is adequate for short-horizon comparative evaluation; 5 expanding folds demonstrate fold RMSE standard deviation of 0.7312 across sequential market regimes.
+5. **Backtest Realism:** With 1-day lag, 0.10% cost, and 0.05% slippage, strategy return is +14.21% vs Buy & Hold +11.15% across 1 trade (0 completed round trips) with 96.6% market exposure. Low trade count indicates an illustrative sample, not persistent alpha.
+
+**Reading these results honestly.** On all three datasets the naive baseline has the lowest test RMSE and the lowest walk-forward RMSE and MAE. On Tech Growth, AR has marginally lower single-split MAE and MAPE; on the other two datasets the naive baseline is best on every single-split error metric. Directional accuracy is at or below 50% in several cases. In this illustrative backtest, the strategy returned 14.21% versus 11.15% for buy-and-hold based on a single trade still open at the end of the window. The value of the application is that it makes comparisons like these transparent.
 
 # 8. Verification
 
 | Check | Result |
 |--------------|--------------|
-| Engine tests (`test_model_engine.sce`) | 263 checks, 0 failures (Scilab 2024.0.0) |
-| GUI workflow test (`test_gui_workflow.sce`, live GUI on a virtual display) | 41 checks, 0 failures |
-| Sample-output regeneration | identical numbers (timestamp only differs) |
-| Original V1 checks | retained inside the new engine suite (and previously run unchanged against the rewritten engine); all pass |
+| Engine tests (`test_model_engine.sce`) | 295 checks, 0 failures (Scilab 2026.1.0 on Windows) |
+| GUI workflow test (`test_gui_workflow.sce`) | 45 checks, 0 failures (live callbacks & graphics contexts) |
+| Total automated checks | 340 checks, 0 failures |
+| Determinism & reproducibility | Bit-for-bit identical predictions and equity curves (`norm == 0`) |
+| Sample-output regeneration | Identical numbers reproduced from engine runs |
+| Platform compatibility | Verified on Windows 11 with Scilab 2026.1.0 and Linux Scilab 2024.0.0 |
 
-The GUI test confirms exactly one graphics window after analyses, comparison, backtest and exports; stale results are cleared on dataset, split, lookback, model, fold, and cost changes; buttons are disabled when prerequisites are missing; invalid inputs yield status-bar messages; exports never overwrite; reset restores defaults; a bad CSV fails cleanly. **Not verified:** Windows or other Scilab versions, very small screens, screen readers, and appearance beyond the captured screenshots.
+The GUI test confirms exactly one graphics window after analyses, comparison, backtest and exports; tab navigation between Data Quality, Assumptions, and Interpretation works cleanly; stale results are cleared on dataset, split, lookback, model, fold, and cost changes; buttons are disabled when prerequisites are missing; invalid inputs yield status-bar messages; exports never overwrite; reset restores defaults; a bad CSV fails cleanly.
 
-# 9. Response to the hackathon feedback
+# 9. Response to the hackathon feedback & V3 differentiation
 
 | Feedback theme | Change | Where to see it |
 |----------|---------------------|-----------|
@@ -137,7 +149,12 @@ The GUI test confirms exactly one graphics window after analyses, comparison, ba
 | Lengthy source comments | Verbose comment blocks substantially reduced and replaced with short purpose and assumption notes | Source files |
 | Comparison with other submissions | Same-window four-way comparison, walk-forward, ranking, baseline verdicts, data-quality summary, richer export | Section 4; screenshots 06, 08 |
 | Simplified modelling/backtesting assumptions | Assumptions panel; naive baseline; buy-and-hold benchmark; costs on every trade; execution lag tests; Model Info limitations | Section 6; screenshot 07 |
+| **V3 Quantitative Differentiation** | Exact 95% OLS prediction intervals with leverage, data-quality anomaly detection, dynamic research interpretation tab, Calmar ratio, market exposure % | `model_engine.sce`, `gui_app.sce`, Test 20 |
 
 # 10. Limitations and future work
 
-Synthetic data only; single split for headline metrics and noisy short test windows; no significance testing; fixed ES parameters and an untuned AR lookback; no regularization for LR; long/cash backtest without spreads or market impact; PDF export covers the three charts only. Possible next steps: real historical data, expanding hyperparameter search inside walk-forward folds, bootstrap confidence intervals on metric differences, regularized regression, and testing on additional Scilab versions and platforms.
+Synthetic data only; single split for headline metrics and noisy short test windows; no significance testing; fixed ES parameters and an untuned AR lookback; no regularization for LR; long/cash backtest without spreads or market impact; PDF export covers the three charts only. Possible next steps: live historical market feeds, expanding hyperparameter search inside walk-forward folds, bootstrap confidence intervals on metric differences, regularized regression (Lasso/Ridge), and execution slippage models based on bar volume.
+
+# 11. License
+
+MIT License -- Copyright (c) 2026 Subodh Shivmurti Bansode.

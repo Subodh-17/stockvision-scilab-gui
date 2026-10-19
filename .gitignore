@@ -2,3 +2,18 @@
 __pycache__/
 *.tmp
 *.log
+!verification_logs/*.log
+
+# Scilab runtime & temporary files
+SCI_TMP_*
+*.sod
+*.bin
+*.dia
+*.dia.ref
+
+# Operating System & Editor artifacts
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp

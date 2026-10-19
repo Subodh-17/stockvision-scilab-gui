@@ -1059,6 +1059,89 @@ check(~(typeof(rep3.bt) == "st"), "build_report_struct: no backtest when not req
 info_ar = strcat(model_info_text("AR", 10, 0.3, 0.1), " ");
 check(strindex(info_ar, "NOT an LSTM") <> [], "model info: AR text states it is not an LSTM");
 
+// ---------------------------------------------------------------------------
+// Test 20: StockVision V3 Elite Engineering, Statistical Rigor & Reproducibility
+// ---------------------------------------------------------------------------
+// 20a. Data Quality Anomaly Detection (non-fatal flags: >50% return, zero volume)
+csv_anom = ["Date,Open,High,Low,Close,Volume"];
+for i = 1:35
+    if i <= 28 then
+        dt = msprintf("2024-01-%02d", i);
+    else
+        dt = msprintf("2024-02-%02d", i - 28);
+    end
+    if i == 15 then
+        csv_anom = [csv_anom; dt + ",100,170,95,160,12000"]; // 60% jump (> 50% anomaly threshold)
+    elseif i == 20 then
+        csv_anom = [csv_anom; dt + ",160,165,155,160,0"];     // zero volume anomaly
+    else
+        csv_anom = [csv_anom; dt + ",100,105,95,100,10000"];
+    end
+end
+anom_path = TMP + "anomaly_test.csv";
+mputl(csv_anom, anom_path);
+d_anom = load_dataset(anom_path);
+check(size(d_anom.warnings, 1) >= 2, "V3 data quality: anomaly flags detected non-fatally");
+warn_str = strcat(d_anom.warnings, " ");
+check(strindex(warn_str, "50% anomaly threshold") <> [], "V3 data quality: >50% daily return spike flagged");
+check(strindex(warn_str, "volume is 0") <> [], "V3 data quality: zero volume row flagged");
+dq_anom = data_quality_summary(d_anom, 0.5);
+check(dq_anom.anomalies_detected >= 2, "V3 data quality summary: retains anomaly count");
+
+// 20b. Sample sizes in compute_metrics
+m_sample = compute_metrics([100; 102; 104], [101; 102; 105], [99; 102; 102]);
+check(m_sample.n_eval == 3 & m_sample.n_dir_scored == 2, "V3 metrics: explicit n_eval and n_dir_scored tracked");
+
+// 20c. Statistically Justified 95% OLS Prediction Intervals
+r_lr3 = run_model(real_data, "LR", split_cal, AR_P, ES_A, ES_B);
+check(isfield(r_lr3, "interval_low") & isfield(r_lr3, "interval_high"), "V3 intervals: LR next-day forecast includes prediction interval");
+check(r_lr3.interval_low < r_lr3.next_price & r_lr3.next_price < r_lr3.interval_high, "V3 intervals: point prediction strictly inside 95% interval");
+check(r_lr3.interval_high - r_lr3.interval_low > 0, "V3 intervals: positive non-zero interval width");
+
+r_ar3 = run_model(real_data, "AR", split_cal, AR_P, ES_A, ES_B);
+check(isfield(r_ar3, "interval_low") & isfield(r_ar3, "interval_high"), "V3 intervals: AR next-day forecast includes prediction interval");
+check(r_ar3.interval_low < r_ar3.next_price & r_ar3.next_price < r_ar3.interval_high, "V3 intervals: AR prediction inside 95% interval");
+
+r_es3 = run_model(real_data, "ES", split_cal, AR_P, ES_A, ES_B);
+check(isfield(r_es3, "interval_low") & isfield(r_es3, "interval_high"), "V3 intervals: ES next-day forecast includes prediction interval");
+check(r_es3.interval_low < r_es3.next_price & r_es3.next_price < r_es3.interval_high, "V3 intervals: ES prediction inside 95% interval");
+
+// 20d. Transparent Model Selection Ranking Metadata
+check(isfield(cmp.rank, "primary_metric") & strindex(cmp.rank.primary_metric, "RMSE") <> [], "V3 ranking: primary ranking metric documented");
+check(isfield(cmp.rank, "tie_break_rule") & strindex(cmp.rank.tie_break_rule, "RMSE") <> [], "V3 ranking: tie-break rule documented");
+
+// 20e. Walk-Forward Fold Dispersion and Evaluation Count
+check(isfield(cmp.wf, "rmse_std") & size(cmp.wf.rmse_std, 1) == 4, "V3 walk-forward: fold RMSE standard deviation reported");
+check(cmp.wf.rmse_std(1) >= 0 & ~isnan(cmp.wf.rmse_std(1)), "V3 walk-forward: fold dispersion is non-negative and finite");
+check(isfield(cmp.wf, "total_eval_obs") & cmp.wf.total_eval_obs > 0, "V3 walk-forward: total evaluated observations counted");
+
+// 20f. Backtest Realism Metrics (Exposure, Costs Paid, Calmar, Profit Factor)
+check(isfield(bt_e, "exposure_pct") & bt_e.exposure_pct >= 0 & bt_e.exposure_pct <= 100, "V3 backtest: market exposure percentage tracked");
+check(isfield(bt_e, "total_costs_paid") & bt_e.total_costs_paid >= 0, "V3 backtest: cumulative transaction costs paid tracked");
+check(isfield(bt_e, "buyhold_costs_paid") & bt_e.buyhold_costs_paid >= 0, "V3 backtest: buy & hold entry cost paid tracked");
+check(isfield(bt_e, "calmar_ratio") & isfield(bt_e, "profit_factor"), "V3 backtest: Calmar ratio and profit factor computed");
+
+// 20g. Dynamic Quantitative Research Interpretation
+interp_text = format_analytical_interpretation(cmp, r_sel, dq, bt_e);
+check(size(interp_text, 1) >= 15, "V3 interpretation: dynamic research section generated");
+interp_blob = strcat(interp_text, " ");
+check(strindex(interp_blob, "QUANTITATIVE RESEARCH INTERPRETATION") <> [], "V3 interpretation: header present");
+check(strindex(interp_blob, "MODEL BENCHMARK & RANKING") <> [], "V3 interpretation: benchmark ranking discussed");
+check(strindex(interp_blob, "COMPARISON WITH NAIVE BASELINE") <> [], "V3 interpretation: naive baseline compared");
+check(strindex(interp_blob, "DIRECTIONAL TIMING") <> [], "V3 interpretation: directional accuracy evaluated");
+check(strindex(interp_blob, "METHODOLOGICAL LIMITATIONS") <> [], "V3 interpretation: methodological caveats and disclaimer present");
+
+// 20h. Determinism and Exact Reproducibility
+r_det1 = run_model(real_data, "AR", split_cal, AR_P, ES_A, ES_B);
+r_det2 = run_model(real_data, "AR", split_cal, AR_P, ES_A, ES_B);
+check(norm(r_det1.y_pred - r_det2.y_pred) == 0, "V3 determinism: run_model produces bit-for-bit identical predictions");
+check(r_det1.next_price == r_det2.next_price, "V3 determinism: next-day forecast is perfectly deterministic");
+
+bt_det1 = run_backtest(r_det1.y_true, r_det1.y_pred, 0.5, -0.5, 100000, 0.1, 0.05);
+bt_det2 = run_backtest(r_det2.y_true, r_det2.y_pred, 0.5, -0.5, 100000, 0.1, 0.05);
+check(norm(bt_det1.strategy_value - bt_det2.strategy_value) == 0, "V3 determinism: backtest equity curves are bit-for-bit reproducible");
+check(bt_det1.total_costs_paid == bt_det2.total_costs_paid, "V3 determinism: cumulative costs paid is deterministic");
+
 mprintf("\n========================================\n");
 mprintf("ALL MODEL ENGINE TESTS PASSED\n");
 mprintf("========================================\n");

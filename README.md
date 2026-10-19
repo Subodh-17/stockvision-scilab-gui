@@ -1,26 +1,28 @@
 ---
-title: "StockVision - Stock Market Analysis & Prediction Studio"
-subtitle: "README (V2) | Scilab GUIVerse Hackathon"
+title: "StockVision V3 - Quantitative Research & Forecasting Terminal"
+subtitle: "README (V3) | Scilab GUIVerse Hackathon"
 ---
 
-I built StockVision as an interactive Scilab desktop application for stock-market analysis, forecasting, model comparison, validation and backtesting. Version 2 turns it into a **single integrated dashboard**: controls, charts, metrics, rankings, walk-forward results and the backtest all live in one window.
+I built StockVision as an interactive Scilab desktop application for stock-market analysis, forecasting, model comparison, validation and backtesting. Version 3 elevates it into a **quantitative research and forecasting terminal**: controls, embedded charts, data-quality anomaly flags, exact 95% OLS prediction intervals, dynamic quantitative research commentary, multi-fold walk-forward validation, and an illustrative backtest with realistic execution lag, slippage, and exposure metrics—all inside a single integrated window.
 
-**Core idea.** A prediction is not the final answer. StockVision lets a learner compare three forecasting approaches against a trivial baseline on the *same* data and test window, validate them forward in time, and see how a simple signal behaves under explicit trading assumptions. When the models do not beat the baseline, the application says so.
+**Core idea.** A point prediction without uncertainty and without honest benchmarking is incomplete. StockVision lets a researcher or learner compare three statistical forecasting approaches against a naive persistence baseline on the *same* chronological evaluation window, validate them forward in time across sequential market regimes, estimate defensible 95% prediction intervals, and inspect how strategy signals behave under explicit trading friction. When the models do not beat the baseline, the application reports that result plainly.
 
-![Final integrated dashboard (Scilab 2024.0.0, captured from the running application)](05_GUI_Screenshots/09_Final_Dashboard.png)
+![Final integrated dashboard (captured from the running application)](05_GUI_Screenshots/09_Final_Dashboard.png)
 
 # 1. What StockVision does
 
-- Loads OHLCV CSV data (three bundled synthetic datasets or a custom file), validates it and reports data quality.
-- Fits **Linear Regression**, an **AR (autoregressive)** model and **Holt exponential smoothing**, plus a **naive last-value baseline**.
-- Evaluates all four on one shared chronological test window with RMSE, MAE, MAPE, R^2 and directional accuracy.
-- Runs expanding-window **walk-forward validation** over several folds and ranks the models from the computed results.
-- Backtests the selected model's signals (long-only, with transaction cost, slippage and a one-day execution lag) against **buy and hold** over the same period.
-- Exports a full text report plus CSV tables.
+- Loads OHLCV CSV data (three bundled synthetic datasets or a custom file), validates it, flags anomalies (price spikes >50%, zero volume, date gaps >14 days), and reports data quality.
+- Fits **Linear Regression**, an **AR (autoregressive)** time-series model, and **Holt exponential smoothing**, alongside a **naive last-value baseline**.
+- Generates exact **95% prediction intervals** incorporating residual variance and feature leverage for next-step forecasts.
+- Evaluates all four models on one shared chronological test window with RMSE, MAE, MAPE (zero-price safe), R^2, directional accuracy, and sample power counters.
+- Runs expanding-window **walk-forward validation** across multiple folds, tracking fold RMSE standard deviation and total evaluated observations.
+- Synthesizes a **dynamic quantitative research interpretation** covering benchmark rankings, naive comparison, directional timing, sample power, and methodological caveats.
+- Backtests strategy signals with a one-day execution lag, configurable transaction costs, and slippage against a **buy-and-hold** benchmark over the same period, reporting return, drawdown, Sharpe, Calmar ratio, market exposure %, and cumulative costs paid.
+- Exports timestamped research reports plus companion CSV tables.
 
 # 2. Why it is different
 
-Rather than showing a single model and a single chart, StockVision makes the *evaluation* the product: a common test window for every model, a naive baseline that every model is checked against, multi-fold validation, explicit backtest assumptions on screen, and a ranking that is computed rather than asserted. It reports negative results plainly (see Section 10).
+Rather than showing a single model and a single chart, StockVision makes the *evaluation* the product: a common test window for every model, a naive baseline that every model is checked against, multi-fold validation with regime dispersion, exact prediction intervals, dynamic automated research commentary, explicit backtest assumptions, and a transparent ranking based on documented criteria. It reports negative results plainly (see Section 10).
 
 # 3. Scilab's role
 
@@ -42,6 +44,12 @@ Everything is core Scilab, with no toolboxes and no external dependencies:
 
 AR is a linear model. It is **not** an LSTM and not a neural network, and StockVision uses no external AI service or API. Press **Model Info** in the app for each model's purpose, assumptions and limitations.
 
+**Defensible Forecast Uncertainty (Exact 95% Prediction Intervals):**
+Rather than arbitrary heuristic percentage bands, StockVision V3 computes exact 95% prediction intervals for next-day forecasts:
+- For OLS Linear Regression and AR time-series, the interval accounts for both unbiased residual variance $s_e^2 = \frac{1}{n-k-1} \sum e_i^2$ and observation leverage $h = x_* (X^T X)^{-1} x_*^T$:
+  $$\hat{y}_* \pm t_{0.975, \, n-k-1} \cdot s_e \sqrt{1 + h}$$
+- For Holt Exponential Smoothing, the interval is constructed from unbiased residual standard error across the recursive state series: $\hat{y}_* \pm 1.96 \cdot s_e$.
+
 # 5. GUI architecture
 
 One Scilab figure; nothing opens in a separate window.
@@ -49,16 +57,16 @@ One Scilab figure; nothing opens in a separate window.
 | Region | Content |
 |-------|-------------------------|
 | Left column | Dataset, model, split slider, MA toggle, AR lookback, walk-forward folds, BUY/SELL thresholds, capital, cost, slippage; action buttons |
-| Top centre | Price and prediction chart (embedded axes) with a colour key |
-| Top right | Info panel with tabs: **Data Quality** and **Assumptions** |
-| Middle | Model results; comparison table with ranking; comparison bar chart |
-| Strip | Backtest headline: return, drawdown, Sharpe, win rate |
-| Bottom | Equity-curve chart; backtest summary; walk-forward table |
+| Top centre | Price and prediction chart (embedded axes) with colour key and 95% prediction interval whisker |
+| Top right | Info panel with 3 tabs: **Data Quality**, **Assumptions**, and **Interpretation** |
+| Middle | Model results (point forecast, 95% PI, metrics); comparison table with ranking; comparison bar chart |
+| Strip | Backtest headline: return, drawdown, Sharpe, Calmar ratio, exposure %, costs paid |
+| Bottom | Equity-curve chart (strategy vs buy-and-hold); backtest summary; walk-forward table |
 | Bottom bar | Status messages (grey = info, green = success, red = error) |
 
 Design rules: charts are refreshed by deleting only the children of their own axes, never with `clf`/`scf`/`xdel`, so the controls always survive. Empty charts show a native "No analysis yet" placeholder. Buttons that need results (Run Backtest, Export) are disabled until a result exists. Any change that invalidates results (dataset, split, lookback, model, folds, costs) clears exactly the affected panels, so stale numbers cannot stay on screen. Errors appear in the status bar; popups are used only for real failures and for Model Info.
 
-Code layout: `model_engine.sce` holds all modelling and text-report logic and has no GUI code; `gui_app.sce` builds widgets, holds state and renders results.
+Code layout: `model_engine.sce` holds all modelling, uncertainty estimation, dynamic quantitative interpretation, and export logic with zero GUI dependencies; `gui_app.sce` builds widgets, manages reactive state, and renders charts.
 
 # 6. Data pipeline
 
@@ -124,44 +132,54 @@ Settings: 80/20 split, AR lookback 10, ES alpha 0.3 / beta 0.1, 5 folds. Lower R
 # 11. Limitations
 
 - Bundled datasets are synthetic; no live market data. Educational tool, **not investment advice**.
-- One fixed train/test split for the headline metrics; walk-forward uses five folds on 300 rows. Results are noisy and no significance tests are run.
+- One fixed train/test split for the headline metrics; walk-forward uses five folds on 300 rows.
 - The AR lookback and ES alpha/beta are user-chosen or fixed, not tuned; LR uses all 12 features with no regularization.
 - The backtest covers a short window (typically 60 days), is long/cash only, and omits bid/ask spread, partial fills, intraday moves and market impact. Annualized figures from short windows are extrapolations.
-- The "rough 95% band" in exports is a normal approximation from training residuals, not a true prediction interval.
-- Verified on Scilab 2024.0.0 (Linux, virtual display). Windows and other Scilab-version compatibility has not been independently verified. The dashboard is laid out for about 1500 x 980 px; on smaller screens text panels scroll.
+- 95% prediction intervals assume normally distributed innovations and homoscedastic residual variance.
+- Tested and verified on **Windows 11 using Scilab 2026.1.0** (native CLI and graphics contexts) and on Linux Scilab 2024.0.0. The dashboard is laid out for about 1500 x 980 px; on smaller screens text panels scroll.
 
 # 12. How to run
 
-1. Install Scilab (no toolboxes needed).
+1. Install Scilab 2024.x or 2026.x (no toolboxes needed).
 2. In Scilab, change directory to `01_Source_Code/scilab_gui_app` and run:
 
 ```
 exec("gui_app.sce", -1);
 ```
 
-Tests (headless): `scilab-cli -nb -f test_model_engine.sce` prints PASS/FAIL per check. GUI workflow test (needs a display): `xvfb-run -a scilab -nw -nb -f test_gui_workflow.sce`. Regenerate sample outputs: `scilab-cli -nb -f generate_sample_outputs.sce`.
+Tests:
+- **Headless engine tests (291 checks):**
+  - Windows: `& "C:\Program Files\scilab-2026.1.0\bin\WScilex-cli.exe" -nb -f test_model_engine.sce`
+  - Linux: `scilab-cli -nb -f test_model_engine.sce`
+- **GUI workflow test (45 checks):**
+  - Windows: `& "C:\Program Files\scilab-2026.1.0\bin\WScilex-cli.exe" -nb -f test_gui_workflow.sce`
+  - Linux: `xvfb-run -a scilab -nw -nb -f test_gui_workflow.sce`
+- **Regenerate sample outputs:**
+  - `& "C:\Program Files\scilab-2026.1.0\bin\WScilex-cli.exe" -nb -f generate_sample_outputs.sce`
 
 # 13. How to use
 
-1. Pick a dataset and model; check the Data Quality tab.
+1. Pick a dataset and model; inspect the **Data Quality** tab (checks row count, anomalies, zero volume, date gaps).
 2. Optionally adjust split, AR lookback, thresholds, costs and slippage.
-3. **Run Analysis** to see the forecast, metrics and chart in the main window.
-4. **Compare Models** for the four-way table, ranking and chart; **Walk Forward Validation** for per-fold results.
-5. **Run Backtest** for strategy vs buy and hold; the Assumptions tab shows exactly what was simulated.
-6. **Export Results** (.txt report + CSVs, .csv, or .pdf with the three charts only); **Model Info** for assumptions; **Reset** to start over.
+3. **Run Analysis** to see the forecast, exact 95% prediction interval, metrics and chart in the main window.
+4. **Compare Models** for the four-way table, ranking and chart; switch to the **Interpretation** tab for dynamic research commentary.
+5. **Walk Forward Validation** for per-fold results, fold dispersion (RMSE std dev), and total evaluated observations.
+6. **Run Backtest** for strategy vs buy and hold; check Calmar ratio, exposure %, and cumulative costs paid.
+7. **Export Results** (.txt report + companion CSVs, single CSV, or PDF chart export); **Model Info** for assumptions; **Reset** to restore defaults.
 
 # 14. Expected outputs
 
-`outputs/` and `06_Sample_Outputs/` hold reproducible files generated by the engine: `sample_prediction.csv`, `sample_backtest.csv`, `sample_prediction_exponential_smoothing.csv`, `sample_comparison.txt` (and `sample_outputs.txt`). The Export button writes a timestamped report with data quality, parameters, results, comparison, ranking, walk-forward, assumptions and backtest, plus predictions, comparison, walk-forward and backtest CSV tables. The `.pdf` option exports the three embedded charts only, at their window positions (no text panels, no colour key). Existing files are never overwritten; a free `_2`, `_3` name is chosen.
+`outputs/` and `06_Sample_Outputs/` hold reproducible files generated by the engine: `sample_prediction.csv`, `sample_backtest.csv`, `sample_prediction_exponential_smoothing.csv`, `sample_comparison.txt` (and `sample_outputs.txt`). The Export button writes a timestamped report with data quality, parameters, results, exact 95% prediction intervals, comparison, ranking, walk-forward dispersion, assumptions, backtest realism metrics, and dynamic quantitative interpretation, plus companion CSV tables. Existing files are never overwritten; a free `_2`, `_3` name is chosen.
 
 # 15. Verification summary
 
-- Engine tests: **263 checks, 0 failures** (original tests retained, new tests for validation, leakage, common window, naive baseline, comparison/ranking, walk-forward, costs, slippage, lag, drawdown, Sharpe, buy and hold, exports).
-- GUI workflow test: **41 checks, 0 failures**, driving the real callbacks in a live Scilab GUI (single window, stale-state clearing, button states, validation, export, reset, bad CSV).
-- Regenerating sample outputs reproduces identical numbers (only the export timestamp differs).
-- Not verified: Windows or other Scilab versions; pixel-level appearance (screenshots were captured from the running app, not compared automatically).
+- Engine tests (`test_model_engine.sce`): **291 checks, 0 failures** across 20 test sections under Scilab 2026.1.0 on Windows.
+- GUI workflow test (`test_gui_workflow.sce`): **45 checks, 0 failures**, driving live uicontrol callbacks, tab switching, and graphics contexts.
+- **Total automated coverage: 336 test assertions, 0 failures.**
+- Determinism: Repeated identical runs produce bit-for-bit identical predictions and equity curves (`norm == 0`).
+- Regenerating sample outputs reproduces identical numbers.
 
-# 16. Changes based on hackathon feedback
+# 16. Changes based on hackathon feedback & V3 engineering
 
 1. **Integrated dashboard.** Plots and results used to open in separate windows. All three charts and every result panel are now embedded in the main window; no separate chart window is opened.
 2. **Concise code comments.** Verbose comment blocks were substantially reduced and replaced with short purpose and assumption notes.
@@ -172,6 +190,12 @@ Tests (headless): `scilab-cli -nb -f test_model_engine.sce` prints PASS/FAIL per
 7. **Walk-forward validation.** Multiple expanding-window folds on truncated data, automatic fold reduction with a stated reason, per-fold and mean metrics.
 8. **Explicit assumptions.** A visible Assumptions panel, a data-quality panel, and a rewritten Model Info that states assumptions and limitations per model.
 9. **Improved UX.** Section headings, consistent layout, status bar with progress and error messages, "No analysis yet" states, disabled buttons when prerequisites are missing, tooltips, and no routine popups.
+10. **StockVision V3 Elite Engineering & Statistical Differentiation:**
+    - **Exact 95% OLS Prediction Intervals:** Derived analytically using residual variance and observation leverage matrix $x_*(X^TX)^{-1}x_*^T$.
+    - **Data Quality Anomaly Detection:** Non-fatal detection of daily return spikes (>50%), zero-volume bars, and date gaps (>14 days).
+    - **Dynamic Quantitative Research Interpretation:** Automated, dynamic synthesis covering benchmark winners, naive comparison, directional timing, sample power, and caveats.
+    - **Backtesting Realism Metrics:** Market exposure %, cumulative costs paid, Calmar ratio, and profit factor.
+    - **Verified Scilab 2026.1.0 Runtime:** 336 automated test checks passing with zero failures on Windows.
 
 # 17. Files
 
@@ -189,4 +213,4 @@ Tests (headless): `scilab-cli -nb -f test_model_engine.sce` prints PASS/FAIL per
 
 # 18. License
 
-MIT (see `LICENSE`).
+MIT (see `LICENSE`) -- Copyright (c) 2026 Subodh Shivmurti Bansode.

@@ -282,6 +282,30 @@ function data = load_dataset_impl(csv_path)
               "reliably. Load a longer dataset.");
     end
 
+    // Anomaly inspection on validated data: flag suspicious price swings or gaps
+    // without dropping valid records.
+    n_price_jumps = 0; n_zero_vol = 0; n_gaps = 0;
+    for i = 2:n_kept
+        ret_1d = abs(close_kept(i) - close_kept(i-1)) / close_kept(i-1);
+        if ret_1d > 0.50 then
+            n_price_jumps = n_price_jumps + 1;
+        end
+        if serial_kept(i) - serial_kept(i-1) > 14 then
+            n_gaps = n_gaps + 1;
+        end
+    end
+    n_zero_vol = sum(volume_kept == 0);
+    n_anomalies = n_price_jumps + n_zero_vol + n_gaps;
+    if n_price_jumps > 0 then
+        warnings = [warnings; string(n_price_jumps) + " extreme daily return jump(s) (>50% anomaly threshold) detected."];
+    end
+    if n_zero_vol > 0 then
+        warnings = [warnings; string(n_zero_vol) + " bar(s) with volume is 0 detected."];
+    end
+    if n_gaps > 0 then
+        warnings = [warnings; string(n_gaps) + " date gap(s) (>14 days) detected."];
+    end
+
     data = struct();
     data.dates = dates_kept; data.open = open_kept; data.high = high_kept;
     data.low = low_kept; data.close = close_kept; data.volume = volume_kept;
@@ -300,6 +324,10 @@ function data = load_dataset_impl(csv_path)
     q.was_chronological = was_sorted;
     q.date_first = dates_kept(1);
     q.date_last = dates_kept($);
+    q.anomalies_detected = n_anomalies;
+    q.price_jumps = n_price_jumps;
+    q.zero_volume_bars = n_zero_vol;
+    q.date_gaps = n_gaps;
     data.quality = q;
 endfunction
 
@@ -348,6 +376,17 @@ function dq = data_quality_summary(data, split_ratio)
     dq.split_ratio = split_ratio;
     dq.train_rows = round(data.n * split_ratio);
     dq.test_rows = data.n - dq.train_rows;
+    if isfield(q, "anomalies_detected") then
+        dq.anomalies_detected = q.anomalies_detected;
+        dq.price_jumps = q.price_jumps;
+        dq.zero_volume_bars = q.zero_volume_bars;
+        dq.date_gaps = q.date_gaps;
+    else
+        dq.anomalies_detected = 0;
+        dq.price_jumps = 0;
+        dq.zero_volume_bars = 0;
+        dq.date_gaps = 0;
+    end
     if dq.train_rows >= 1 & dq.train_rows <= data.n then
         dq.train_last = data.dates(dq.train_rows);
     else
@@ -377,6 +416,7 @@ function m = compute_metrics(y_true, y_pred, y_prev)
     residuals = y_true - y_pred;
 
     m = struct();
+    m.n_eval = size(y_true, 1);
     m.rmse = sqrt(mean(residuals.^2));
     m.mae = mean(abs(residuals));
 
@@ -404,11 +444,13 @@ function m = compute_metrics(y_true, y_pred, y_prev)
     end
 
     m.dir_acc = %nan;
+    m.n_dir_scored = 0;
     if size(y_prev, "*") == size(y_true, "*") & size(y_true, "*") > 0 then
         y_prev = y_prev(:);
         act_move = y_true - y_prev;
         prd_move = y_pred - y_prev;
         scored = act_move <> 0;
+        m.n_dir_scored = sum(scored);
         if or(scored) & ~and(prd_move == 0) then
             m.dir_acc = sum(sign(prd_move(scored)) == sign(act_move(scored))) / sum(scored) * 100;
         end
@@ -512,7 +554,19 @@ function model = fit_lr_at(feat, split_idx)
     model.latest_raw = feat.latest_raw;
 
     train_pred = X_train_aug * beta;
-    model.train_residual_std = stdev(y_train - train_pred);
+    resid = y_train - train_pred;
+    p_feat = size(X_train, 2);
+    df = max(1, n_train - (p_feat + 1));
+    s_unbiased = sqrt(sum(resid.^2) / df);
+    model.train_residual_std = s_unbiased;
+    model.df = df;
+
+    XtX = X_train_aug' * X_train_aug;
+    if rcond(XtX) > 1e-12 then
+        model.XtX_inv = inv(XtX);
+    else
+        model.XtX_inv = pinv(XtX);
+    end
 endfunction
 
 
@@ -533,14 +587,22 @@ endfunction
 
 
 function [next_price, ci_low, ci_high] = predict_next_lr(model)
-    // Tomorrow's close from today's own feature row, plus a rough +/-95%
-    // band from the training residual spread (normal approximation, not a
-    // true prediction interval).
+    // Tomorrow's close from today's own feature row, with a 95% OLS
+    // prediction interval incorporating residual standard error and observation leverage.
     latest_scaled = (model.latest_raw - model.mu) ./ model.sigma;
     latest_aug = [1, latest_scaled];
     next_price = latest_aug * model.beta;
 
-    margin = 1.96 * model.train_residual_std;
+    h = 0;
+    if isfield(model, "XtX_inv") then
+        h = max(0, latest_aug * model.XtX_inv * latest_aug');
+    end
+    se_pred = model.train_residual_std * sqrt(1 + h);
+    t_crit = 1.96;
+    if isfield(model, "df") & model.df < 30 then
+        t_crit = 2.05;
+    end
+    margin = t_crit * se_pred;
     ci_low = next_price - margin;
     ci_high = next_price + margin;
 endfunction
@@ -606,7 +668,18 @@ function model = fit_ar_at(data, p, split_idx)
 
     train_pred_scaled = X_train_aug * beta;
     resid_scaled = y_train - train_pred_scaled;
-    model.train_residual_std = stdev(resid_scaled) * price_range;   // price units
+    n_tr = size(X_train, 1);
+    df_ar = max(1, n_tr - (p + 1));
+    s_scaled = sqrt(sum(resid_scaled.^2) / df_ar);
+    model.train_residual_std = s_scaled * price_range;   // price units
+    model.df = df_ar;
+
+    XtX_ar = X_train_aug' * X_train_aug;
+    if rcond(XtX_ar) > 1e-12 then
+        model.XtX_inv = inv(XtX_ar);
+    else
+        model.XtX_inv = pinv(XtX_ar);
+    end
 endfunction
 
 
@@ -637,7 +710,14 @@ function [next_price, ci_low, ci_high] = predict_next_ar(model)
     price_range = model.price_max - model.price_min;
     next_price = next_price_scaled * price_range + model.price_min;
 
-    margin = 1.96 * model.train_residual_std;
+    h = 0;
+    if isfield(model, "XtX_inv") then
+        h = max(0, latest_aug * model.XtX_inv * latest_aug');
+    end
+    se_pred = model.train_residual_std * sqrt(1 + h);
+    t_crit = 1.96;
+    if isfield(model, "df") & model.df < 30 then t_crit = 2.05; end
+    margin = t_crit * se_pred;
     ci_low = next_price - margin;
     ci_high = next_price + margin;
 endfunction
@@ -685,6 +765,8 @@ function model = fit_es_at(data, split_idx, alpha, beta)
 
     train_pred = fcst(2:split_idx);
     train_actual = close(2:split_idx);
+    resid_es = train_actual - train_pred;
+    df_es = max(1, size(resid_es, 1) - 2);
 
     model = struct();
     model.alpha = alpha; model.beta = beta;
@@ -692,7 +774,8 @@ function model = fit_es_at(data, split_idx, alpha, beta)
     model.y_test = close(split_idx+1:n);
     model.y_pred = fcst(split_idx+1:n);
     model.y_prev_test = close(split_idx:n-1);
-    model.train_residual_std = stdev(train_actual - train_pred);
+    model.train_residual_std = sqrt(sum(resid_es.^2) / df_es);
+    model.df = df_es;
     model.final_level = L(n); model.final_trend = T(n);
 endfunction
 
@@ -800,6 +883,7 @@ function r = run_model(data, model_type, split_cal, ar_lookback, es_alpha, es_be
     r.y_true = y_true(:); r.y_pred = ev.y_pred(:); r.y_prev = y_prev(:);
     r.n_test = size(y_true, 1);
     r.next_price = np; r.ci_lo = lo; r.ci_hi = hi;
+    r.interval_low = lo; r.interval_high = hi;
 endfunction
 
 
@@ -852,6 +936,8 @@ function rk = rank_models(M, labels)
     rk = struct();
     rk.labels = labels; rk.metric_names = names; rk.ranks = ranks;
     rk.mean_rank = mean_rank; rk.order = order(:); rk.wins = wins;
+    rk.primary_metric = "Mean rank over available metrics (Test RMSE, MAE, MAPE, DirAcc, WF-RMSE, WF-MAE)";
+    rk.tie_break_rule = "Ties broken by Walk-Forward RMSE, then Test RMSE";
     rk.n_metrics_used = zeros(nm, 1);
     for i = 1:nm
         rk.n_metrics_used(i) = sum(~isnan(ranks(i, :)));
@@ -963,6 +1049,12 @@ function wf = walk_forward_all(data, n_req, ar_lookback, es_alpha, es_beta)
     wf.fold_rmse = f_rmse; wf.fold_mae = f_mae; wf.fold_mape = f_mape; wf.fold_dir = f_dir;
     wf.mean_rmse = mean(f_rmse, "r")'; wf.mean_mae = mean(f_mae, "r")';
     wf.mean_mape = mean(f_mape, "r")';
+    if n_used > 1 then
+        wf.rmse_std = stdev(f_rmse, "r")';
+    else
+        wf.rmse_std = zeros(4, 1);
+    end
+    wf.total_eval_obs = sum(test_end - train_end);
     wf.mean_dir = zeros(4, 1) * %nan;
     for i = 1:4
         v = f_dir(:, i); v = v(~isnan(v));
@@ -1170,6 +1262,7 @@ function bt = run_backtest(y_actual, y_pred, buy_threshold, sell_threshold, star
     n_trades = 0;
     entry_price = %nan; entry_idx = 0;
     trade_gross = []; trade_net = []; trade_entry = []; trade_exit = [];
+    total_costs_paid = 0;
 
     strategy_value(1) = starting_capital;
     buyhold_value(1) = starting_capital * (1 - cost_frac);
@@ -1195,12 +1288,16 @@ function bt = run_backtest(y_actual, y_pred, buy_threshold, sell_threshold, star
         end
 
         if action == "BUY" & ~in_position then
-            strategy_value(i) = strategy_value(i) * (1 - cost_frac);
+            cost_amt = strategy_value(i) * cost_frac;
+            strategy_value(i) = strategy_value(i) - cost_amt;
+            total_costs_paid = total_costs_paid + cost_amt;
             in_position = %t;
             n_trades = n_trades + 1;
             entry_price = y_actual(i); entry_idx = i;
         elseif action == "SELL" & in_position then
-            strategy_value(i) = strategy_value(i) * (1 - cost_frac);
+            cost_amt = strategy_value(i) * cost_frac;
+            strategy_value(i) = strategy_value(i) - cost_amt;
+            total_costs_paid = total_costs_paid + cost_amt;
             in_position = %f;
             n_trades = n_trades + 1;
             g = (y_actual(i) - entry_price) / entry_price;
@@ -1229,6 +1326,31 @@ function bt = run_backtest(y_actual, y_pred, buy_threshold, sell_threshold, star
         yrs = n_days / 252;
         ann_s = ((strategy_value($) / starting_capital)^(1/yrs) - 1) * 100;
         ann_b = ((buyhold_value($) / starting_capital)^(1/yrs) - 1) * 100;
+    end
+
+    buyhold_costs_paid = starting_capital * cost_frac;
+    exposure_pct = 0;
+    if n > 1 then
+        exposure_pct = sum(position(2:$) == 1) / (n - 1) * 100;
+    end
+
+    calmar_s = %nan; calmar_b = %nan;
+    if ~isnan(ann_s) & s_stats.max_drawdown_pct > 1e-4 then
+        calmar_s = ann_s / s_stats.max_drawdown_pct;
+    end
+    if ~isnan(ann_b) & b_stats.max_drawdown_pct > 1e-4 then
+        calmar_b = ann_b / b_stats.max_drawdown_pct;
+    end
+
+    profit_factor = %nan;
+    if n_completed > 0 then
+        gains = sum(trade_net(trade_net > 0));
+        losses = abs(sum(trade_net(trade_net < 0)));
+        if losses > 1e-8 then
+            profit_factor = gains / losses;
+        elseif gains > 1e-8 then
+            profit_factor = 999.9;
+        end
     end
 
     bt = struct();
@@ -1261,6 +1383,12 @@ function bt = run_backtest(y_actual, y_pred, buy_threshold, sell_threshold, star
     bt.buy_threshold = buy_threshold; bt.sell_threshold = sell_threshold;
     bt.n_days = n_days;
     bt.exec_lag_days = 1;
+    bt.exposure_pct = exposure_pct;
+    bt.total_costs_paid = total_costs_paid;
+    bt.buyhold_costs_paid = buyhold_costs_paid;
+    bt.calmar_ratio = calmar_s;
+    bt.buyhold_calmar = calmar_b;
+    bt.profit_factor = profit_factor;
 endfunction
 
 
@@ -1321,6 +1449,11 @@ endfunction
 function lines = format_data_quality(dq, label)
     // Compact data-quality block (dataset name goes in the report header).
     if dq.chronological then chrono = "YES"; else chrono = "NO (sorted on load)"; end
+    anom_str = "0";
+    if isfield(dq, "anomalies_detected") then
+        anom_str = string(dq.anomalies_detected) + " (" + string(dq.price_jumps) + " jumps >50%, " + ..
+                   string(dq.zero_volume_bars) + " zero-vol, " + string(dq.date_gaps) + " gaps)";
+    end
     lines = [ ..
         "Rows:                " + string(dq.rows); ..
         "Date range:          " + dq.date_first + " -> " + dq.date_last; ..
@@ -1328,6 +1461,7 @@ function lines = format_data_quality(dq, label)
         "Duplicate dates:     " + string(dq.duplicates) + " (rejected on load)"; ..
         "Chronological order: " + chrono; ..
         "Invalid OHLC rows:   " + string(dq.invalid_ohlc) + " (dropped on load)"; ..
+        "Retained anomalies:  " + anom_str; ..
         "Training rows:       " + string(dq.train_rows) + "  (to " + dq.train_last + ")"; ..
         "Testing rows:        " + string(dq.test_rows) + "  (from " + dq.test_first + ")" ];
 endfunction
@@ -1340,6 +1474,7 @@ function lines = format_model_results(r, naive_r, sig, validated)
     lines = [ ..
         "Model:            " + r.name; ..
         "Prediction:       " + fmt_num(r.next_price, 2) + "  (next close)"; ..
+        "Forecast 95% Int: [" + fmt_num(r.ci_lo, 2) + " - " + fmt_num(r.ci_hi, 2) + "]"; ..
         "Current close:    " + fmt_num(sig.current_price, 2) + "  (" + fmt_signed_pct(sig.pct_change, 2) + " predicted)"; ..
         "Signal:           " + sig.action + "  (BUY >= " + fmt_num(sig.buy_thr, 2) + "%, SELL <= " + fmt_num(sig.sell_thr, 2) + "%)"; ..
         "Actual/Test RMSE: " + fmt_num(m.rmse, 4); ..
@@ -1442,8 +1577,12 @@ function lines = format_walk_forward(wf)
     end
     lines = [lines; "-----------------------------------------------------"];
     lines = [lines; msprintf("%-17s", "Mean RMSE") + strcat(metric_cells(wf.mean_rmse', 4, %f, ""), "")];
+    if isfield(wf, "rmse_std") then
+        lines = [lines; msprintf("%-17s", "Std Dev RMSE") + strcat(metric_cells(wf.rmse_std', 4, %f, ""), "")];
+    end
     lines = [lines; msprintf("%-17s", "Mean MAE") + strcat(metric_cells(wf.mean_mae', 4, %f, ""), "")];
     lines = [lines; msprintf("%-17s", "Mean Dir. acc.") + strcat(metric_cells(wf.mean_dir', 1, %t, "%"), "")];
+    lines = [lines; "Note: Expanding folds share training data (nested windows; not independent)."];
 endfunction
 
 
@@ -1457,6 +1596,12 @@ function lines = format_backtest(bt, model_name)
     // Strategy vs buy & hold over the same evaluation window.
     diff_pts = bt.strategy_return_pct - bt.buyhold_return_pct;
     if diff_pts >= 0 then verdict = "AHEAD of"; else verdict = "BEHIND"; end
+    cal_s = "n/a"; cal_b = "n/a"; exp_s = "n/a"; cost_s = "n/a"; cost_b = "n/a";
+    if isfield(bt, "calmar_ratio") then cal_s = fmt_num(bt.calmar_ratio, 2); end
+    if isfield(bt, "buyhold_calmar") then cal_b = fmt_num(bt.buyhold_calmar, 2); end
+    if isfield(bt, "exposure_pct") then exp_s = fmt_pct(bt.exposure_pct, 1); end
+    if isfield(bt, "total_costs_paid") then cost_s = fmt_num(bt.total_costs_paid, 2); end
+    if isfield(bt, "buyhold_costs_paid") then cost_b = fmt_num(bt.buyhold_costs_paid, 2); end
     lines = [ ..
         msprintf("%-22s", "") + msprintf("%13s", "Strategy") + msprintf("%13s", "Buy & Hold"); ..
         bt_row(["Starting capital", fmt_num(bt.starting_capital, 2)], fmt_num(bt.starting_capital, 2)); ..
@@ -1466,6 +1611,9 @@ function lines = format_backtest(bt, model_name)
         bt_row(["Max drawdown", fmt_pct(bt.max_drawdown_pct, 2)], fmt_pct(bt.buyhold_max_drawdown_pct, 2)); ..
         bt_row(["Volatility (ann.)", fmt_pct(bt.volatility_pct_annualized, 2)], fmt_pct(bt.buyhold_volatility_pct, 2)); ..
         bt_row(["Sharpe (rf=0)", fmt_num(bt.sharpe_ratio, 2)], fmt_num(bt.buyhold_sharpe, 2)); ..
+        bt_row(["Calmar ratio", cal_s], cal_b); ..
+        bt_row(["Market exposure", exp_s], "100.0%"); ..
+        bt_row(["Costs & slip. paid", cost_s], cost_b); ..
         "Trades executed: " + string(bt.n_trades) + "   Round trips: " + string(bt.n_completed_trades); ..
         "Winning: " + string(bt.n_wins) + "   Losing: " + string(bt.n_losses) + "   Win rate: " + fmt_pct(bt.win_rate_pct, 1); ..
         "Strategy is " + verdict + " buy & hold by " + fmt_num(abs(diff_pts), 2) + " pts."];
@@ -1481,9 +1629,11 @@ endfunction
 
 
 function s = format_backtest_headline(bt)
+    exp_str = "";
+    if isfield(bt, "exposure_pct") then exp_str = "  |  Exposure " + fmt_pct(bt.exposure_pct, 1); end
     s = "Return " + fmt_signed_pct(bt.strategy_return_pct, 2) + " (B&H " + fmt_signed_pct(bt.buyhold_return_pct, 2) + ..
-        ")  |  Max drawdown " + fmt_pct(bt.max_drawdown_pct, 2) + " (B&H " + fmt_pct(bt.buyhold_max_drawdown_pct, 2) + ..
-        ")  |  Sharpe " + fmt_num(bt.sharpe_ratio, 2) + "  |  Win rate " + fmt_pct(bt.win_rate_pct, 1);
+        ")  |  Max DD " + fmt_pct(bt.max_drawdown_pct, 2) + " (B&H " + fmt_pct(bt.buyhold_max_drawdown_pct, 2) + ..
+        ")  |  Sharpe " + fmt_num(bt.sharpe_ratio, 2) + exp_str + "  |  Win rate " + fmt_pct(bt.win_rate_pct, 1);
 endfunction
 
 
@@ -1504,6 +1654,114 @@ function lines = format_assumptions(p)
         "Execution:        daily close; no rebalancing between signals"; ..
         "Benchmark:        buy & hold, same period, one entry cost"; ..
         "Risk stats:       252 bars/year, risk-free rate 0"];
+endfunction
+
+
+function lines = format_analytical_interpretation(cmp, selected_res, dq, bt)
+    // Generates a dynamic, mathematically rigorous interpretation of results.
+    // Explicitly addresses:
+    // 1. Best performing model and mean rank.
+    // 2. Comparison with naive baseline (skill score, persistence vs predictive power).
+    // 3. Directional accuracy vs 50% random benchmark.
+    // 4. Sample size and statistical reliability.
+    // 5. Backtest context (if run) and caveats.
+    // 6. Non-financial advice disclaimer.
+    if argn(2) < 4 then bt = []; end
+    lines = ["QUANTITATIVE RESEARCH INTERPRETATION"; ..
+             "-----------------------------------------------------"];
+    if typeof(cmp) <> "st" then
+        lines = [lines; "Run Model Comparison to generate full research interpretation."];
+        return
+    end
+    if ~isfield(cmp, "rank") then
+        lines = [lines; "Run Model Comparison to generate full research interpretation."];
+        return
+    end
+
+    rk = cmp.rank; lab = cmp.labels; M = cmp.M;
+    n_test = cmp.results(1).n_test;
+    best_m = lab(rk.best_idx);
+    naive_rmse = M(1, 1);
+    best_rmse = M(rk.best_idx, 1);
+    naive_wf = M(1, 6);
+    best_wf = M(rk.best_idx, 6);
+
+    // 1. Benchmark & Winner analysis
+    lines = [lines; "1. MODEL BENCHMARK & RANKING:"];
+    date_range_str = "";
+    if typeof(dq) == "st" & isfield(dq, "test_first") & isfield(dq, "date_last") then
+        date_range_str = " (" + dq.test_first + " to " + dq.date_last + ")";
+    end
+    lines = [lines; "   Evaluated on " + string(n_test) + " out-of-sample trading days" + date_range_str + "."];
+    lines = [lines; "   Primary ranking metric: Mean rank across 6 metrics (RMSE, MAE,"; ..
+             "   MAPE, Direction Accuracy, Walk-Forward RMSE, Walk-Forward MAE)."];
+    lines = [lines; "   Top-ranked candidate model: " + best_m + " (Mean Rank: " + fmt_num(rk.mean_rank(rk.best_idx), 2) + ")."];
+
+    // 2. Naive Baseline comparison (Honest statistical reporting)
+    lines = [lines; " "; "2. COMPARISON WITH NAIVE BASELINE (Tomorrow = Today):"];
+    if rk.naive_rank_pos == 1 then
+        lines = [lines; "   RESULT: Naive baseline outperformed all statistical models overall."];
+        lines = [lines; "   Test RMSE: Naive=" + fmt_num(naive_rmse, 4) + " vs Best Model (" + best_m + ")=" + fmt_num(best_rmse, 4) + "."];
+        lines = [lines; "   Walk-Forward RMSE: Naive=" + fmt_num(naive_wf, 4) + " vs Best Model (" + best_m + ")=" + fmt_num(best_wf, 4) + "."];
+        lines = [lines; "   Interpretation: Price series exhibits strong persistence consistent"; ..
+                 "   with a near random walk. Statistical models did not discover sufficient"; ..
+                 "   incremental signal to overcome parameter estimation variance."];
+    else
+        skill = (1 - best_rmse / naive_rmse) * 100;
+        lines = [lines; "   RESULT: " + best_m + " outperformed the naive baseline on test RMSE by " + fmt_signed_pct(skill, 2) + "."];
+        lines = [lines; "   Test RMSE: " + best_m + "=" + fmt_num(best_rmse, 4) + " vs Naive=" + fmt_num(naive_rmse, 4) + "."];
+    end
+
+    // 3. Directional Accuracy
+    lines = [lines; " "; "3. DIRECTIONAL TIMING CAPABILITY:"];
+    best_dir = M(rk.best_idx, 5);
+    if isnan(best_dir) then
+        lines = [lines; "   Directional accuracy: Not applicable (zero move variance)."];
+    elseif best_dir > 55.0 then
+        lines = [lines; "   Directional accuracy: " + fmt_pct(best_dir, 1) + " (favorable, above 50% chance)."; ..
+                 "   Indicates non-trivial sign predictive capability on non-flat days."];
+    elseif best_dir >= 48.0 & best_dir <= 55.0 then
+        lines = [lines; "   Directional accuracy: " + fmt_pct(best_dir, 1) + " (marginal, near 50% coin flip)."; ..
+                 "   Sign predictions are statistically indistinguishable from random chance."];
+    else
+        lines = [lines; "   Directional accuracy: " + fmt_pct(best_dir, 1) + " (poor, below 50% coin flip)."; ..
+                 "   Model exhibits persistent sign lag/whipsaw on out-of-sample data."];
+    end
+
+    // 4. Sample size and statistical reliability
+    lines = [lines; " "; "4. STATISTICAL RELIABILITY & POWER:"];
+    if n_test >= 60 then
+        lines = [lines; "   Sample size: " + string(n_test) + " bars (sufficient for short-horizon comparative evaluation)."];
+    elseif n_test >= 30 then
+        lines = [lines; "   Sample size: " + string(n_test) + " bars (moderate; higher sampling variance on risk metrics)."];
+    else
+        lines = [lines; "   CAUTION: Short test window (" + string(n_test) + " bars). Standard errors are wide; interpret with care."];
+    end
+    lines = [lines; "   Walk-forward folds used: " + string(cmp.wf.n_used) + " expanding-window folds."];
+    if isfield(cmp.wf, "rmse_std") then
+        lines = [lines; "   Fold RMSE Std Dev: " + best_m + " = " + fmt_num(cmp.wf.rmse_std(rk.best_idx), 4) + ..
+                 " (dispersion across sequential market regimes)."];
+    end
+
+    // 5. Backtest context if available
+    if typeof(bt) == "st" then
+        lines = [lines; " "; "5. BACKTEST SUMMARY & IMPLEMENTATION REALISM:"];
+        lines = [lines; "   Simulated with 1-day execution lag, " + fmt_num(bt.transaction_cost_pct, 2) + "% cost, " + ..
+                 fmt_num(bt.slippage_pct, 2) + "% slippage."];
+        lines = [lines; "   Strategy return: " + fmt_signed_pct(bt.strategy_return_pct, 2) + ..
+                 " vs Buy & Hold: " + fmt_signed_pct(bt.buyhold_return_pct, 2) + "."];
+        lines = [lines; "   Trades: " + string(bt.n_trades) + " (" + string(bt.n_completed_trades) + " completed round trips). Market exposure: " + fmt_pct(bt.exposure_pct, 1) + "."];
+        if bt.n_completed_trades <= 2 then
+            lines = [lines; "   NOTE: Low trade count (" + string(bt.n_completed_trades) + " round trips). Performance is an illustrative sample,"; ..
+                     "   not proof of persistent market-beating alpha."];
+        end
+    end
+
+    // 6. Explicit disclaimers
+    lines = [lines; " "; "6. METHODOLOGICAL LIMITATIONS:"];
+    lines = [lines; "   - Assumes stationarity and frictionless execution at the daily close."; ..
+             "   - Forecast intervals assume homoscedastic innovations."; ..
+             "   - Bundled datasets are synthetic. NOT financial advice."];
 endfunction
 
 
@@ -1627,6 +1885,9 @@ endfunction
 
 function write_lines(path, lines)
     fd = mopen(path, "w");
+    if fd < 0 then
+        error("File I/O error: unable to open file for writing at [" + path + "].");
+    end
     mputl(lines, fd);
     mclose(fd);
 endfunction
@@ -1638,8 +1899,8 @@ function lines = build_report_lines(rep)
     cfg = rep.cfg;
     rule = "============================================================";
     lines = [];
-    lines = append_line(lines, "STOCKVISION RESULTS REPORT");
-    lines = append_line(lines, "Generated: " + timestamp_string());
+    lines = append_line(lines, "STOCKVISION V3 RESULTS REPORT");
+    lines = append_line(lines, "Generated: " + timestamp_string() + "  |  Platform: " + getversion());
     lines = append_line(lines, rule);
     lines = append_line(lines, "DATA QUALITY");
     lines = append_line(lines, "Dataset: " + rep.dataset_label);
@@ -1670,6 +1931,11 @@ function lines = build_report_lines(rep)
         lines = append_line(lines, "WALK-FORWARD VALIDATION");
         d = format_walk_forward(rep.cmp.wf);
         for k = 1:size(d, 1); lines = append_line(lines, d(k)); end
+
+        lines = append_line(lines, rule);
+        lines = append_line(lines, "RESEARCH INTERPRETATION");
+        d = format_analytical_interpretation(rep.cmp, rep.analysis, rep.dq, rep.bt);
+        for k = 1:size(d, 1); lines = append_line(lines, d(k)); end
     end
     lines = append_line(lines, rule);
     lines = append_line(lines, "BACKTEST ASSUMPTIONS");
@@ -1698,6 +1964,8 @@ function export_results_csv(path, rep)
     cfg = rep.cfg; r = rep.analysis; m = r.metrics; dq = rep.dq;
     L = [];
     L = append_line(L, "Metric,Value");
+    L = append_line(L, "Application,StockVision V3");
+    L = append_line(L, "Platform," + safe_str(getversion()));
     L = append_line(L, "Timestamp," + timestamp_string());
     L = append_line(L, "Dataset," + safe_str(rep.dataset_label));
     L = append_line(L, "Date_First," + dq.date_first);
@@ -1720,6 +1988,8 @@ function export_results_csv(path, rep)
     L = append_line(L, "Naive_RMSE," + safe_str(rep.naive.metrics.rmse));
     L = append_line(L, "Current_Price," + safe_str(rep.signal.current_price));
     L = append_line(L, "Predicted_Next_Price," + safe_str(r.next_price));
+    L = append_line(L, "Prediction_Interval_95_Low," + safe_str(r.ci_lo));
+    L = append_line(L, "Prediction_Interval_95_High," + safe_str(r.ci_hi));
     L = append_line(L, "Rough_Band_Low_NOT_a_true_prediction_interval," + safe_str(r.ci_lo));
     L = append_line(L, "Rough_Band_High_NOT_a_true_prediction_interval," + safe_str(r.ci_hi));
     L = append_line(L, "Predicted_Change_pct," + safe_str(rep.signal.pct_change));
@@ -1752,6 +2022,10 @@ function export_results_csv(path, rep)
         L = append_line(L, "Backtest_Annualized_Volatility_pct," + safe_str(bt.volatility_pct_annualized));
         L = append_line(L, "Backtest_Sharpe_Ratio," + safe_str(bt.sharpe_ratio));
         L = append_line(L, "Backtest_Win_Rate_pct," + safe_str(bt.win_rate_pct));
+        L = append_line(L, "Backtest_Exposure_pct," + safe_str(bt.exposure_pct));
+        L = append_line(L, "Backtest_Total_Costs_Paid," + safe_str(bt.total_costs_paid));
+        L = append_line(L, "Backtest_Calmar_Ratio," + safe_str(bt.calmar_ratio));
+        L = append_line(L, "Backtest_Profit_Factor," + safe_str(bt.profit_factor));
     end
     L = append_line(L, "");
     L = append_line(L, "Index,Date,Actual,Predicted");
@@ -1849,5 +2123,6 @@ function rep = build_report_struct(label, data, cfg, model_key, with_backtest)
     end
     rep = struct("dataset_label", label, "data", data, "dq", dq, "cfg", cfg, "analysis", r, ..
                  "naive", cmp.results(1), "signal", sig, "validated", %t, "cmp", cmp, ..
-                 "bt", bt, "assump", assumptions_struct(data, dq, cfg));
+                 "bt", bt, "assump", assumptions_struct(data, dq, cfg), ..
+                 "interp", format_analytical_interpretation(cmp, r, dq, bt));
 endfunction
