@@ -875,12 +875,232 @@ endfunction
 
 
 // ---------------------------------------------------------------------------
+// 3d. Ridge Regression (L2-Regularized Technical & Return Model)
+// ---------------------------------------------------------------------------
+
+function feat = build_ridge_features(data)
+    // Features at calendar row i use data up to day i only; target is close(i+1).
+    // feat.row_idx(j) is the calendar row of feature row j (target is close(row_idx+1)).
+    // feat.latest_raw is today's own feature row (calendar row n), used for next-day forecast.
+    n = data.n;
+    close = data.close;
+    open_p = data.open;
+    high_p = data.high;
+    low_p = data.low;
+    vol = data.volume;
+
+    MIN_HISTORY = 15;
+    if n < MIN_HISTORY then
+        error("build_ridge_features: need at least " + string(MIN_HISTORY) + ..
+              " rows to construct regularized technical & return features (got " + string(n) + ").");
+    end
+
+    // 1. Returns over multiple horizons (momentum / mean-reversion)
+    ret_1d = [%nan; (close(2:$) - close(1:$-1)) ./ max(close(1:$-1), 1e-6)];
+    ret_3d = zeros(n, 1) * %nan;
+    ret_5d = zeros(n, 1) * %nan;
+    for i = 4:n
+        ret_3d(i) = (close(i) - close(i-3)) / max(close(i-3), 1e-6);
+    end
+    for i = 6:n
+        ret_5d(i) = (close(i) - close(i-5)) / max(close(i-5), 1e-6);
+    end
+
+    // 2. Moving averages & price oscillators (5-day and 10-day)
+    ma5 = zeros(n, 1) * %nan;
+    ma10 = zeros(n, 1) * %nan;
+    osc_ma5 = zeros(n, 1) * %nan;
+    osc_ma10 = zeros(n, 1) * %nan;
+    for i = 5:n
+        m5 = mean(close(i-4:i));
+        ma5(i) = m5;
+        if m5 > 1e-8 then osc_ma5(i) = (close(i) - m5) / m5; end
+    end
+    for i = 10:n
+        m10 = mean(close(i-9:i));
+        ma10(i) = m10;
+        if m10 > 1e-8 then osc_ma10(i) = (close(i) - m10) / m10; end
+    end
+
+    // 3. Normalized Parkinson intraday range & close position
+    hl_range = (high_p - low_p) ./ max(close, 1e-6);
+    intraday_pos = (close - low_p) ./ max(high_p - low_p, 1e-6);
+
+    // 4. Volume ratio to 10-day volume average
+    vol_ratio = zeros(n, 1) * %nan;
+    for i = 10:n
+        v_mean = mean(vol(i-9:i));
+        if v_mean > 1e-8 then
+            vol_ratio(i) = vol(i) / v_mean;
+        else
+            vol_ratio(i) = 1.0;
+        end
+    end
+
+    // 5. Short price lags (autoregressive components)
+    lag1 = [%nan; close(1:$-1)];
+    lag2 = [%nan; %nan; close(1:$-2)];
+    lag3 = [%nan; %nan; %nan; close(1:$-3)];
+
+    // 6. Rolling volatility (5-day standard deviation)
+    volat5 = zeros(n, 1) * %nan;
+    for i = 5:n
+        volat5(i) = stdev(close(i-4:i));
+    end
+
+    // Target is tomorrow's close price: close(i+1)
+    target = [close(2:$); %nan];
+
+    // Combine features: 13 engineered features
+    X_raw_all = [close, ret_1d, ret_3d, ret_5d, osc_ma5, osc_ma10, ..
+                 hl_range, intraday_pos, vol_ratio, lag1, lag2, lag3, volat5];
+
+    valid_rows = and(~isnan(X_raw_all), "c") & ~isnan(target);
+
+    feat = struct();
+    feat.X_raw = X_raw_all(valid_rows, :);
+    feat.y = target(valid_rows);
+    feat.row_idx = matrix(find(valid_rows), -1, 1);
+    feat.n_valid = size(feat.X_raw, 1);
+    feat.feature_names = ["Close", "Return_1d", "Return_3d", "Return_5d", ..
+                          "Osc_MA5", "Osc_MA10", "HL_Range", "Intraday_Pos", ..
+                          "Vol_Ratio10", "Lag_1", "Lag_2", "Lag_3", "Volat_5"];
+
+    // Today's row (row n) for next-day forecast
+    if or(isnan(X_raw_all(n, :))) then
+        error("build_ridge_features: the most recent row is missing feature values (need >= 15 rows).");
+    end
+    feat.latest_raw = X_raw_all(n, :);
+
+    if feat.n_valid < 20 then
+        error("build_ridge_features: only " + string(feat.n_valid) + " valid rows survive after warmup -- need >= 20. Load a longer dataset.");
+    end
+endfunction
+
+
+function model = fit_ridge_at(feat, split_idx, lambda_val)
+    // Ridge regression (L2 regularization) on standardized features.
+    // The first split_idx valid rows train; the rest test.
+    // mu and sigma are computed STRICTLY from training rows (zero future leakage).
+    // The penalty lambda_val shrinks coefficients toward zero to eliminate multicollinearity.
+    if argn(2) < 3 then lambda_val = 1.0; end
+    if lambda_val <= 0 then lambda_val = 1e-4; end
+
+    n_valid = feat.n_valid;
+    if split_idx < 1 | split_idx >= n_valid then
+        error("fit_ridge_regression: train/test split leaves an empty side (" + ..
+              string(split_idx) + " train / " + string(n_valid - split_idx) + ..
+              " test rows) -- adjust the split slider.");
+    end
+
+    X_train_raw = feat.X_raw(1:split_idx, :);
+    y_train = feat.y(1:split_idx);
+    X_test_raw = feat.X_raw(split_idx+1:$, :);
+    y_test = feat.y(split_idx+1:$);
+
+    mu = mean(X_train_raw, "r");
+    sigma = stdev(X_train_raw, "r");
+    sigma(sigma == 0) = 1;
+
+    n_train = split_idx; n_test = n_valid - split_idx;
+    X_train = (X_train_raw - repmat(mu, n_train, 1)) ./ repmat(sigma, n_train, 1);
+    X_test  = (X_test_raw  - repmat(mu, n_test, 1))  ./ repmat(sigma, n_test, 1);
+
+    // Augmented matrix with intercept
+    X_train_aug = [ones(n_train, 1), X_train];
+    p_feat = size(X_train, 2);
+
+    // Regularization penalty matrix: unpenalized intercept, penalty lambda on features
+    I_reg = diag([0; ones(p_feat, 1) * lambda_val]);
+
+    XtX = X_train_aug' * X_train_aug;
+    XtX_reg = XtX + I_reg;
+
+    // Solve (X'X + lambda*I_reg) \ (X' * y)
+    beta = XtX_reg \ (X_train_aug' * y_train);
+
+    model = struct();
+    model.beta = beta; model.mu = mu; model.sigma = sigma;
+    model.lambda = lambda_val;
+    model.X_test = X_test; model.y_test = y_test;
+    model.y_prev_test = X_test_raw(:, 1);   // Column 1 is Close (previous close)
+    model.row_idx_test = feat.row_idx(split_idx+1:$);
+    model.split_idx = split_idx;
+    model.latest_raw = feat.latest_raw;
+
+    // Training residuals and effective degrees of freedom
+    train_pred = X_train_aug * beta;
+    resid = y_train - train_pred;
+
+    if rcond(XtX_reg) > 1e-12 then
+        XtX_reg_inv = inv(XtX_reg);
+    else
+        XtX_reg_inv = pinv(XtX_reg);
+    end
+    model.XtX_reg_inv = XtX_reg_inv;
+    model.XtX = XtX;
+
+    // Effective degrees of freedom: df_eff = n - tr(2*H - H*H')
+    // tr(H) = tr(X' * X * inv(X'X + lambda*I))
+    M_hat = XtX * XtX_reg_inv;
+    tr_H = sum(diag(M_hat));
+    tr_HH = sum(diag(M_hat * M_hat));
+    df_eff = max(1, n_train - (2 * tr_H - tr_HH));
+    s_unbiased = sqrt(sum(resid.^2) / df_eff);
+
+    model.train_residual_std = s_unbiased;
+    model.df = df_eff;
+    model.effective_p = tr_H;
+endfunction
+
+
+function model = fit_ridge_regression(feat, split_ratio, lambda_val)
+    if argn(2) < 3 then lambda_val = 1.0; end
+    model = fit_ridge_at(feat, round(feat.n_valid * split_ratio), lambda_val);
+endfunction
+
+
+function ev = evaluate_ridge_model(model)
+    X_test_aug = [ones(size(model.X_test, 1), 1), model.X_test];
+    y_pred = X_test_aug * model.beta;
+    prev = [];
+    if isfield(model, "y_prev_test") then prev = model.y_prev_test; end
+    ev = compute_metrics(model.y_test, y_pred, prev);
+    ev.y_pred = y_pred;
+endfunction
+
+
+function [next_price, ci_low, ci_high] = predict_next_ridge(model)
+    // Tomorrow's close from today's feature row, with an exact 95% Ridge prediction interval
+    // incorporating residual standard error, regularization shrinkage, and observation leverage.
+    latest_scaled = (model.latest_raw - model.mu) ./ model.sigma;
+    latest_aug = [1, latest_scaled];
+    next_price = latest_aug * model.beta;
+
+    // Ridge leverage for observation x*:
+    // h* = x* * inv(X'X + lambda*I) * X'X * inv(X'X + lambda*I) * x*'
+    h = 0;
+    if isfield(model, "XtX_reg_inv") & isfield(model, "XtX") then
+        h = max(0, latest_aug * model.XtX_reg_inv * model.XtX * model.XtX_reg_inv * latest_aug');
+    end
+    se_pred = model.train_residual_std * sqrt(1 + h);
+    df_val = 30;
+    if isfield(model, "df") then df_val = model.df; end
+    t_crit = student_t_crit(df_val, 0.05);
+    margin = t_crit * se_pred;
+    ci_low = next_price - margin;
+    ci_high = next_price + margin;
+endfunction
+
+
+// ---------------------------------------------------------------------------
 // 4. Common-window runner, comparison and ranking
 // ---------------------------------------------------------------------------
-function r = run_model(data, model_type, split_cal, ar_lookback, es_alpha, es_beta)
+function r = run_model(data, model_type, split_cal, ar_lookback, es_alpha, es_beta, ridge_lambda)
     // Fits one model on calendar rows 1..split_cal and evaluates it on the
-    // common test window split_cal+1..n. model_type: "LR","AR","ES","NAIVE".
+    // common test window split_cal+1..n. model_type: "LR","AR","ES","RIDGE","NAIVE".
     // The test window is identical for every model type.
+    if argn(2) < 7 then ridge_lambda = 1.0; end
     n = data.n; close = data.close;
     MIN_TEST = 5; MIN_TRAIN_SAMPLES = 20;
     if split_cal < 1 | split_cal >= n then
@@ -932,6 +1152,23 @@ function r = run_model(data, model_type, split_cal, ar_lookback, es_alpha, es_be
         r.name = "Exp. Smoothing (a=" + string(es_alpha) + ", b=" + string(es_beta) + ")";
         r.label = "ES";
         r.n_train = split_cal;    // rows that build the smoothing state
+
+    elseif model_type == "RIDGE" then
+        feat = build_ridge_features(data);
+        split_idx = sum(feat.row_idx + 1 <= split_cal);
+        if split_idx < MIN_TRAIN_SAMPLES then
+            error("Ridge Regression: only " + string(split_idx) + " training samples after warmup -- " + ..
+                  "need at least " + string(MIN_TRAIN_SAMPLES) + ". Raise the train share or load more rows.");
+        end
+        model = fit_ridge_at(feat, split_idx, ridge_lambda);
+        if or(model.row_idx_test + 1 <> r.test_idx) then
+            error("run_model: internal test-window misalignment for Ridge.");
+        end
+        ev = evaluate_ridge_model(model);
+        [np, lo, hi] = predict_next_ridge(model);
+        y_true = model.y_test; y_prev = model.y_prev_test;
+        r.name = "Ridge Regression (L2)"; r.label = "Ridge";
+        r.n_train = split_idx;
 
     elseif model_type == "NAIVE" then
         // Tomorrow = today's close. No fitted parameters.
@@ -1043,21 +1280,32 @@ function rk = rank_models(M, labels)
 endfunction
 
 
-function cmp = compare_models(data, split_ratio, ar_lookback, es_alpha, es_beta, n_folds_req)
-    // Runs Naive, LR, AR and ES on the SAME dataset/split/test window with
-    // the same metrics, adds walk-forward results and the ranking.
-    keys = ["NAIVE", "LR", "AR", "ES"];
-    labels = ["Naive"; "LR"; "AR"; "ES"];
+function cmp = compare_models(data, split_ratio, ar_lookback, es_alpha, es_beta, n_folds_req, include_ridge, ridge_lambda)
+    // Runs models on the SAME dataset/split/test window with the same metrics,
+    // adds walk-forward results and ranking.
+    // If include_ridge is %t (or 7th arg present and %t), includes Ridge Regression (L2).
+    // Defaults to canonical 4 models (Naive, LR, AR, ES) when include_ridge is omitted or %f.
+    if argn(2) < 7 then include_ridge = %f; end
+    if argn(2) < 8 then ridge_lambda = 1.0; end
+
+    if include_ridge then
+        keys = ["NAIVE", "LR", "AR", "ES", "RIDGE"];
+        labels = ["Naive"; "LR"; "AR"; "ES"; "Ridge"];
+    else
+        keys = ["NAIVE", "LR", "AR", "ES"];
+        labels = ["Naive"; "LR"; "AR"; "ES"];
+    end
+    n_models = size(keys, 2);
     split_cal = round(data.n * split_ratio);
 
     results = list();
-    for i = 1:4
-        results($+1) = run_model(data, keys(i), split_cal, ar_lookback, es_alpha, es_beta);
+    for i = 1:n_models
+        results($+1) = run_model(data, keys(i), split_cal, ar_lookback, es_alpha, es_beta, ridge_lambda);
     end
-    wf = walk_forward_all(data, n_folds_req, ar_lookback, es_alpha, es_beta);
+    wf = walk_forward_all(data, n_folds_req, ar_lookback, es_alpha, es_beta, include_ridge, ridge_lambda);
 
-    M = zeros(4, 8) * %nan;
-    for i = 1:4
+    M = zeros(n_models, 8) * %nan;
+    for i = 1:n_models
         m = results(i).metrics;
         M(i, 1:5) = [m.rmse, m.mae, m.mape, m.r2, m.dir_acc];
         M(i, 6:8) = [wf.mean_rmse(i), wf.mean_mae(i), wf.mean_dir(i)];
@@ -1067,6 +1315,7 @@ function cmp = compare_models(data, split_ratio, ar_lookback, es_alpha, es_beta,
     cmp.keys = keys; cmp.labels = labels; cmp.results = results; cmp.wf = wf;
     cmp.M = M; cmp.split_cal = split_cal; cmp.split_ratio = split_ratio;
     cmp.ar_lookback = ar_lookback; cmp.es_alpha = es_alpha; cmp.es_beta = es_beta;
+    cmp.include_ridge = include_ridge; cmp.ridge_lambda = ridge_lambda;
     cmp.rank = rank_models(M, labels);
 endfunction
 
@@ -1074,15 +1323,24 @@ endfunction
 // ---------------------------------------------------------------------------
 // 5. Walk-forward validation
 // ---------------------------------------------------------------------------
-function wf = walk_forward_all(data, n_req, ar_lookback, es_alpha, es_beta)
-    // Expanding-window validation for all four models on the same folds.
-    // Fold f trains on rows 1..train_end(f) and tests on the next fold_size
-    // rows. Each fold runs on data TRUNCATED at its own test end, so nothing
-    // after the fold exists for the models. If the data cannot support
-    // n_req folds the count is reduced and wf.reason says why.
+function wf = walk_forward_all(data, n_req, ar_lookback, es_alpha, es_beta, include_ridge, ridge_lambda)
+    // Expanding-window validation for models on the same folds.
+    // Fold f trains on rows 1..train_end(f) and tests on the next fold_size rows.
+    // Each fold runs on data TRUNCATED at its own test end, so nothing after the fold exists.
+    if argn(2) < 6 then include_ridge = %f; end
+    if argn(2) < 7 then ridge_lambda = 1.0; end
+
+    if include_ridge then
+        keys = ["NAIVE", "LR", "AR", "ES", "RIDGE"];
+        labels = ["Naive"; "LR"; "AR"; "ES"; "Ridge"];
+    else
+        keys = ["NAIVE", "LR", "AR", "ES"];
+        labels = ["Naive"; "LR"; "AR"; "ES"];
+    end
+    n_models = size(keys, 2);
+
     n = data.n;
     MIN_FOLD = 10;
-    keys = ["NAIVE", "LR", "AR", "ES"];
     n_req = max(1, round(n_req));
     min_train = max([round(0.4 * n), 40, ar_lookback + 30]);
     max_folds = floor((n - min_train) / MIN_FOLD);
@@ -1099,8 +1357,8 @@ function wf = walk_forward_all(data, n_req, ar_lookback, es_alpha, es_beta)
     end
     fold_size = floor((n - min_train) / n_used);
 
-    f_rmse = zeros(n_used, 4); f_mae = zeros(n_used, 4);
-    f_mape = zeros(n_used, 4); f_dir = zeros(n_used, 4);
+    f_rmse = zeros(n_used, n_models); f_mae = zeros(n_used, n_models);
+    f_mape = zeros(n_used, n_models); f_dir = zeros(n_used, n_models);
     train_end = zeros(n_used, 1); test_end = zeros(n_used, 1);
 
     for f = 1:n_used
@@ -1108,15 +1366,15 @@ function wf = walk_forward_all(data, n_req, ar_lookback, es_alpha, es_beta)
         test_end(f) = train_end(f) + fold_size;
         if f == n_used then test_end(f) = n; end
         d = slice_data(data, test_end(f));      // future rows removed
-        for i = 1:4
-            r = run_model(d, keys(i), train_end(f), ar_lookback, es_alpha, es_beta);
+        for i = 1:n_models
+            r = run_model(d, keys(i), train_end(f), ar_lookback, es_alpha, es_beta, ridge_lambda);
             f_rmse(f, i) = r.metrics.rmse; f_mae(f, i) = r.metrics.mae;
             f_mape(f, i) = r.metrics.mape; f_dir(f, i) = r.metrics.dir_acc;
         end
     end
 
     wf = struct();
-    wf.keys = keys; wf.labels = ["Naive"; "LR"; "AR"; "ES"];
+    wf.keys = keys; wf.labels = labels;
     wf.n_req = n_req; wf.n_used = n_used; wf.reason = reason;
     wf.n_total = n; wf.min_train = min_train; wf.fold_size = fold_size;
     wf.train_end = train_end; wf.test_end = test_end;
@@ -1126,11 +1384,11 @@ function wf = walk_forward_all(data, n_req, ar_lookback, es_alpha, es_beta)
     if n_used > 1 then
         wf.rmse_std = stdev(f_rmse, "r")';
     else
-        wf.rmse_std = zeros(4, 1);
+        wf.rmse_std = zeros(n_models, 1);
     end
     wf.total_eval_obs = sum(test_end - train_end);
-    wf.mean_dir = zeros(4, 1) * %nan;
-    for i = 1:4
+    wf.mean_dir = zeros(n_models, 1) * %nan;
+    for i = 1:n_models
         v = f_dir(:, i); v = v(~isnan(v));
         if size(v, "*") > 0 then wf.mean_dir(i) = mean(v); end
     end
@@ -1139,9 +1397,13 @@ endfunction
 
 // Legacy single-model walk-forward (per-model sample indexing), kept so the
 // original API and its tests still work. The GUI uses walk_forward_all().
-function results = walk_forward_validate(data, model_type, n_folds, ar_lookback)
+function results = walk_forward_validate(data, model_type, n_folds, ar_lookback, ridge_lambda)
+    if argn(2) < 5 then ridge_lambda = 1.0; end
     if model_type == "LR" then
         feat = build_lr_features(data);
+        Xall = feat.X_raw; yall = feat.y; n = feat.n_valid;
+    elseif model_type == "RIDGE" then
+        feat = build_ridge_features(data);
         Xall = feat.X_raw; yall = feat.y; n = feat.n_valid;
     else
         p = ar_lookback;
@@ -1179,7 +1441,13 @@ function results = walk_forward_validate(data, model_type, n_folds, ar_lookback)
         Xte_s = (Xte - repmat(mu, size(Xte,1), 1)) ./ repmat(sigma, size(Xte,1), 1);
 
         Xtr_aug = [ones(size(Xtr_s,1),1), Xtr_s];
-        beta = Xtr_aug \ ytr;
+        if model_type == "RIDGE" then
+            p_f = size(Xtr_s, 2);
+            I_reg = diag([0; ones(p_f, 1) * ridge_lambda]);
+            beta = (Xtr_aug' * Xtr_aug + I_reg) \ (Xtr_aug' * ytr);
+        else
+            beta = Xtr_aug \ ytr;
+        end
         Xte_aug = [ones(size(Xte_s,1),1), Xte_s];
         pred = Xte_aug * beta;
         mt = compute_metrics(yte, pred);
@@ -1577,6 +1845,8 @@ function lines = format_model_results(r, naive_r, sig, validated)
         lines = [lines; "Forecast band:   [" + fmt_num(r.ci_lo, 2) + " - " + fmt_num(r.ci_hi, 2) + "]  (approx. +/-1.96 s_e)"];
     elseif r.model_type == "NAIVE" then
         lines = [lines; "Baseline band:   [" + fmt_num(r.ci_lo, 2) + " - " + fmt_num(r.ci_hi, 2) + "]  (random walk +/-1.96 s_e)"];
+    elseif r.model_type == "RIDGE" then
+        lines = [lines; "Forecast 95% PI:  [" + fmt_num(r.ci_lo, 2) + " - " + fmt_num(r.ci_hi, 2) + "]  (L2-regularized leverage-adj)"];
     else
         lines = [lines; "Forecast 95% PI:  [" + fmt_num(r.ci_lo, 2) + " - " + fmt_num(r.ci_hi, 2) + "]  (leverage-adjusted)"];
     end
@@ -1606,13 +1876,18 @@ endfunction
 
 
 function lines = format_comparison(cmp)
-    // Metric table across Naive / LR / AR / ES on one common test window.
-    M = cmp.M;
+    // Metric table across models on one common test window.
+    M = cmp.M; lab = cmp.labels;
+    header_str = msprintf("%-17s", "Metric");
+    divider = "-----------------";
+    for i = 1:size(lab, 1)
+        header_str = header_str + msprintf("%9s", lab(i));
+        divider = divider + "---------";
+    end
     lines = [ ..
         string(cmp.results(1).n_test) + " test rows, " + string(cmp.wf.n_used) + " WF folds; * = best in row"; ..
-        msprintf("%-17s", "Metric") + msprintf("%9s", "Naive") + msprintf("%9s", "LR") + ..
-            msprintf("%9s", "AR") + msprintf("%9s", "ES"); ..
-        "-----------------------------------------------------"];
+        header_str; ..
+        divider];
     spec = list(list("RMSE", 1, 4, %f, ""), list("MAE", 2, 4, %f, ""), ..
                 list("MAPE", 3, 3, %f, "%"), list("R^2", 4, 4, %t, ""), ..
                 list("Direction acc.", 5, 1, %t, "%"), list("Walk-fwd RMSE", 6, 4, %f, ""), ..
@@ -1627,7 +1902,7 @@ endfunction
 
 function lines = format_ranking(cmp)
     // Ranking text; every statement is derived from cmp.M / cmp.rank.
-    rk = cmp.rank; lab = cmp.labels;
+    rk = cmp.rank; lab = cmp.labels; nm = size(cmp.M, 1);
     nmet = max(rk.n_metrics_used);
     lines = ["MODEL RANKING (mean rank over " + string(nmet) + " metrics; lower = better)"];
     row = ""; place = 0;
@@ -1654,7 +1929,7 @@ function lines = format_ranking(cmp)
         lines = [lines; "Note: top two differ by only " + fmt_num(rk.tie_gap_pct, 2) + "% RMSE (near-tie)."];
     end
     vs = "RMSE vs naive:"; beat = "";
-    for i = 2:4
+    for i = 2:nm
         if ~isnan(rk.skill_rmse(i)) then
             vs = vs + "  " + lab(i) + " " + fmt_signed_pct(rk.skill_rmse(i), 1);
             if rk.skill_rmse(i) > 0 then beat = beat + lab(i) + " "; end
@@ -1670,6 +1945,13 @@ endfunction
 
 
 function lines = format_walk_forward(wf)
+    lab = wf.labels; nm = size(lab, 1);
+    hdr = msprintf("%-5s", "Fold") + msprintf("%-12s", "Test rows");
+    divider = "-----------------";
+    for i = 1:nm
+        hdr = hdr + msprintf("%9s", lab(i));
+        divider = divider + "---------";
+    end
     lines = ["Expanding window: train on all earlier rows, test on the next block."];
     lines = [lines; "Folds: " + string(wf.n_used) + " used (" + string(wf.n_req) + " requested); first train block " + ..
              string(wf.min_train) + " rows."];
@@ -1677,14 +1959,13 @@ function lines = format_walk_forward(wf)
         lines = [lines; "Folds reduced: " + string(wf.n_total) + " rows, " + string(wf.min_train) + " kept for first training block,"; ..
                  "each fold needs >= 10 test rows."];
     end
-    lines = [lines; msprintf("%-5s", "Fold") + msprintf("%-12s", "Test rows") + msprintf("%9s", "Naive") + ..
-             msprintf("%9s", "LR") + msprintf("%9s", "AR") + msprintf("%9s", "ES") + "  (RMSE)"];
+    lines = [lines; hdr + "  (RMSE)"];
     for f = 1:wf.n_used
         rng = string(wf.train_end(f) + 1) + "-" + string(wf.test_end(f));
         cells = metric_cells(wf.fold_rmse(f, :), 4, %f, "");
         lines = [lines; msprintf("%-5s", string(f)) + msprintf("%-12s", rng) + strcat(cells, "")];
     end
-    lines = [lines; "-----------------------------------------------------"];
+    lines = [lines; divider];
     lines = [lines; msprintf("%-17s", "Mean RMSE") + strcat(metric_cells(wf.mean_rmse', 4, %f, ""), "")];
     if isfield(wf, "rmse_std") then
         lines = [lines; msprintf("%-17s", "Std Dev RMSE") + strcat(metric_cells(wf.rmse_std', 4, %f, ""), "")];
@@ -1930,6 +2211,28 @@ function lines = model_info_text(model_type, ar_lookback, es_alpha, es_beta)
             "  - fixed alpha/beta; a poor choice lags or over-reacts"; ..
             "  - extrapolates the recent trend; weak at turning points"; ..
             "  - uses no volume or other features"];
+    elseif model_type == "RIDGE" then
+        lines = [ ..
+            "RIDGE REGRESSION (L2 REGULARIZATION)"; " "; ..
+            "Purpose:"; ..
+            "  Predict the next closing price using regularized technical,"; ..
+            "  momentum, volatility, and volume indicators."; " "; ..
+            "Features (13, all strictly known at the close of day t):"; ..
+            "  Close, 1-day/3-day/5-day returns, 5-day and 10-day moving average"; ..
+            "  oscillators, normalized intraday range (H-L)/C, close position in bar,"; ..
+            "  volume ratio (10-day SMA), lagged closes (1, 2, 3), 5-day volatility."; " "; ..
+            "Method: Tikhonov-regularized least squares with L2 penalty lambda = 1.0."; ..
+            "  Features standardized strictly on TRAINING data (no future leakage)."; ..
+            "  Analytical solution: beta = (Z''*Z + lambda*I_reg) \ (Z''*y)."; " "; ..
+            "Mathematical advantages over OLS:"; ..
+            "  - Regularization penalty eliminates multicollinearity breakdowns"; ..
+            "  - Shrinks coefficient variance, stabilizing out-of-sample predictions"; ..
+            "  - Generates exact leverage-adjusted 95% prediction intervals using"; ..
+            "    effective degrees of freedom: df_eff = n - Tr(2H - H*H'')"; " "; ..
+            "Limitations:"; ..
+            "  - Linear combination in feature space; does not capture jump diffusions"; ..
+            "  - Regularization parameter lambda shrinks coefficients toward zero,"; ..
+            "    which introduces slight in-sample bias to reduce out-of-sample variance"];
     else
         lines = [ ..
             "NAIVE LAST-VALUE BASELINE"; " "; ..
@@ -2159,10 +2462,13 @@ function written = export_companion_csvs(base, rep)
     r = rep.analysis;
     if typeof(rep.cmp) == "st" then
         res = rep.cmp.results;
-        L = "Index,Date,Actual,Naive,LR,AR,ES";
+        lab = rep.cmp.labels;
+        nm = size(lab, 1);
+        L = "Index,Date,Actual";
+        for k = 1:nm; L = L + "," + lab(k); end
         for i = 1:r.n_test
             row = string(i) + "," + rep.data.dates(res(1).test_idx(i)) + "," + safe_str(res(1).y_true(i));
-            for k = 1:4
+            for k = 1:nm
                 row = row + "," + safe_str(res(k).y_pred(i));
             end
             L = append_line(L, row);
@@ -2177,12 +2483,12 @@ function written = export_companion_csvs(base, rep)
     p = unique_path(base + "_predictions.csv"); write_lines(p, L); written = [written; p];
 
     if typeof(rep.cmp) == "st" then
-        lab = rep.cmp.labels; M = rep.cmp.M;
+        lab = rep.cmp.labels; M = rep.cmp.M; nm = size(M, 1);
         names = ["RMSE","MAE","MAPE_pct","R2","Direction_Accuracy_pct","WalkForward_RMSE","WalkForward_MAE","WalkForward_Direction_Accuracy_pct"];
         L = "Metric," + strcat(lab', ",");
         for j = 1:8
             row = names(j);
-            for i = 1:4; row = row + "," + safe_str(M(i, j)); end
+            for i = 1:nm; row = row + "," + safe_str(M(i, j)); end
             L = append_line(L, row);
         end
         p = unique_path(base + "_comparison.csv"); write_lines(p, L); written = [written; p];
@@ -2190,7 +2496,7 @@ function written = export_companion_csvs(base, rep)
         wf = rep.cmp.wf;
         L = "Fold,Train_Rows,Test_First_Row,Test_Last_Row,Model,RMSE,MAE,MAPE_pct,Direction_Accuracy_pct";
         for f = 1:wf.n_used
-            for i = 1:4
+            for i = 1:nm
                 L = append_line(L, string(f) + "," + string(wf.train_end(f)) + "," + string(wf.train_end(f)+1) + "," + ..
                     string(wf.test_end(f)) + "," + wf.labels(i) + "," + safe_str(wf.fold_rmse(f,i)) + "," + ..
                     safe_str(wf.fold_mae(f,i)) + "," + safe_str(wf.fold_mape(f,i)) + "," + safe_str(wf.fold_dir(f,i)));
@@ -2226,8 +2532,10 @@ function rep = build_report_struct(label, data, cfg, model_key, with_backtest)
     // Runs the whole pipeline headlessly (all models, walk-forward, optional
     // backtest) and returns the struct the export functions consume.
     dq = data_quality_summary(data, cfg.split_ratio);
-    cmp = compare_models(data, cfg.split_ratio, cfg.ar_lookback, cfg.es_alpha, cfg.es_beta, cfg.n_folds);
+    include_ridge = (model_key == "RIDGE");
+    cmp = compare_models(data, cfg.split_ratio, cfg.ar_lookback, cfg.es_alpha, cfg.es_beta, cfg.n_folds, include_ridge);
     keys = ["LR", "AR", "ES"];
+    if include_ridge then keys = [keys, "RIDGE"]; end
     r = cmp.results(find(keys == model_key) + 1);
     sig = generate_signal(data.close($), r.next_price, cfg.buy, cfg.sell);
     sig.current_price = data.close($); sig.buy_thr = cfg.buy; sig.sell_thr = cfg.sell;

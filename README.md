@@ -39,17 +39,20 @@ Everything is core Scilab, with no toolboxes and no external dependencies:
 | Model | What it is | Inputs |
 |-------|--------------|-------------|
 | Linear Regression | Ordinary least squares on 12 engineered features | open, high, low, close, volume, 1-day return, 5/10-day MA, 5-day volatility, lag 1-3 closes |
+| Ridge Regression (L2) | Tikhonov-regularized least squares with L2 shrinkage penalty ($\lambda=1.0$) on 13 standardized technical, range, return, and volume features | close, 1d/3d/5d returns, MA5/MA10 oscillators, normalized intraday range $(H-L)/C$, bar position, volume ratio (10d SMA), lags 1-3, 5d volatility |
 | AR(p) | Linear autoregression on the last *p* closes (default 10), fitted by least squares on prices scaled with training min/max | last *p* closes |
 | Exponential smoothing | Holt linear trend, level + trend, fixed alpha = 0.3, beta = 0.1 (not fitted) | closing prices |
 | Naive baseline | Forecast for tomorrow = today's close | closing price |
 
-AR is a linear model. It is **not** an LSTM and not a neural network, and StockVision uses no external AI service or API. Press **Model Info** in the app for each model's purpose, assumptions and limitations.
+AR and Ridge are linear models. They are **not** LSTMs and not neural networks, and StockVision uses no external black-box AI service. Press **Model Info** in the app for each model's purpose, equations, assumptions and limitations.
 
 **Defensible Forecast Uncertainty (Exact 95% Prediction Intervals):**
-Rather than arbitrary heuristic percentage bands, StockVision V3 computes exact 95% prediction intervals for next-day forecasts:
-- For OLS Linear Regression and AR time-series, the interval accounts for both unbiased residual variance $s_e^2 = \frac{1}{n-k-1} \sum e_i^2$ and observation leverage $h = x_* (X^T X)^{-1} x_*^T$:
+Rather than arbitrary heuristic percentage bands, StockVision computes exact 95% prediction intervals for next-day forecasts:
+- For **Ridge Regression (L2)**, the interval incorporates parameter shrinkage, effective degrees of freedom $\text{df}_{\text{eff}} = n - \text{Tr}(2H_\lambda - H_\lambda H_\lambda^T)$, and exact out-of-sample observation leverage $h_* = z_* (Z^TZ + \lambda I)^{-1} (Z^TZ) (Z^TZ + \lambda I)^{-1} z_*^T$:
+  $$\hat{y}_* \pm t_{0.975, \, \text{df}_{\text{eff}}} \cdot s_{\text{ridge}} \sqrt{1 + h_*}$$
+- For **OLS Linear Regression** and **AR time-series**, the interval accounts for unbiased residual variance $s_e^2 = \frac{1}{n-k-1} \sum e_i^2$ and observation leverage $h = x_* (X^T X)^{-1} x_*^T$:
   $$\hat{y}_* \pm t_{0.975, \, n-k-1} \cdot s_e \sqrt{1 + h}$$
-- For Holt Exponential Smoothing, the interval is constructed from unbiased residual standard error across the recursive state series: $\hat{y}_* \pm 1.96 \cdot s_e$.
+- For **Holt Exponential Smoothing**, the interval is constructed from unbiased residual standard error across the recursive state series: $\hat{y}_* \pm 1.96 \cdot s_e$.
 
 # 5. GUI architecture
 
@@ -149,10 +152,13 @@ exec("gui_app.sce", -1);
 ```
 
 Tests:
+- **Phase 2 Ridge Forecasting & Validation suite (93 checks):**
+  - Windows: `& "C:\Program Files\scilab-2026.1.0\bin\WScilex-cli.exe" -nb -f test_forecasting_phase2.sce`
+  - Linux: `scilab-cli -nb -f test_forecasting_phase2.sce`
 - **Headless engine tests (311 checks):**
   - Windows: `& "C:\Program Files\scilab-2026.1.0\bin\WScilex-cli.exe" -nb -f test_model_engine.sce`
   - Linux: `scilab-cli -nb -f test_model_engine.sce`
-- **Market data adapter tests (60 checks):**
+- **Market data adapter tests (70 checks):**
   - Windows: `& "C:\Program Files\scilab-2026.1.0\bin\WScilex-cli.exe" -nb -f test_market_data_adapter.sce`
   - Linux: `scilab-cli -nb -f test_market_data_adapter.sce`
 - **GUI workflow test (56 checks):**
@@ -165,12 +171,13 @@ Tests:
 
 1. Pick a dataset or market feed; enter ticker symbol (e.g. `AAPL`, `MSFT`, `INFY`, `RELIANCE`) and click **Fetch Live** (or select a prepackaged synthetic/mock dataset).
 2. Inspect the **Data Quality** tab (checks provider provenance, exchange timezone, data freshness, row count, anomalies, zero volume, date gaps).
-3. Optionally adjust split, AR lookback, thresholds, costs and slippage.
-4. **Run Analysis** to see the forecast, exact 95% prediction interval, metrics and chart in the main window.
-5. **Compare Models** for the four-way table, ranking and chart; switch to the **Interpretation** tab for dynamic research commentary.
-6. **Walk Forward Validation** for per-fold results, fold dispersion (RMSE std dev), and total evaluated observations.
-7. **Run Backtest** for strategy vs buy and hold; check Calmar ratio, exposure %, and cumulative costs paid.
-8. **Export Results** (.txt report + companion CSVs, single CSV, or PDF chart export); **Model Info** for assumptions; **Reset** to restore defaults.
+3. Select model (`Linear Regression`, `AR Time-Series`, `Exponential Smoothing`, or `Ridge Regression (L2)`).
+4. Optionally adjust split, AR lookback, thresholds, costs and slippage.
+5. **Run Analysis** to see the forecast, exact 95% prediction interval, metrics and chart in the main window.
+6. **Compare Models** for the comparative table, ranking and chart; switch to the **Interpretation** tab for dynamic research commentary.
+7. **Walk Forward Validation** for per-fold results, fold dispersion (RMSE std dev), and total evaluated observations.
+8. **Run Backtest** for strategy vs buy and hold; check Calmar ratio, exposure %, and cumulative costs paid.
+9. **Export Results** (.txt report + companion CSVs, single CSV, or PDF chart export); **Model Info** for assumptions; **Reset** to restore defaults.
 
 # 14. Expected outputs
 
@@ -178,10 +185,11 @@ Tests:
 
 # 15. Verification summary
 
-- Engine tests (`test_model_engine.sce`): **311 checks, 0 failures** across 21 test sections under Scilab 2026.1.0 on Windows.
-- Market data adapter tests (`test_market_data_adapter.sce`): **60 checks, 0 failures** covering API parsing, chronological sorting, error status codes, caching TTL, and model integration.
-- GUI workflow test (`test_gui_workflow.sce`): **56 checks, 0 failures**, driving live uicontrol callbacks, market data fetches, tab switching, and graphics contexts.
-- **Total automated coverage: 427 test assertions, 0 failures.**
+- **Phase 2 Ridge Forecasting & Validation suite (`test_forecasting_phase2.sce`): 93 checks, 0 failures** verifying 13 features, anti-leakage invariants, Tikhonov conditioning, leverage-adjusted intervals, 5-model comparison, 5-model walk-forward, multi-market data (AAPL & INFY), and GUI callbacks.
+- **Engine tests (`test_model_engine.sce`): 311 checks, 0 failures** across 21 test sections under Scilab 2026.1.0 on Windows.
+- **Market data adapter tests (`test_market_data_adapter.sce`): 70 checks, 0 failures** covering API parsing, cache provenance, error sanitization, and model integration.
+- **GUI workflow test (`test_gui_workflow.sce`): 56 checks, 0 failures**, driving live uicontrol callbacks, market data fetches, tab switching, and graphics contexts.
+- **Total automated coverage: 530 test assertions, 0 failures.**
 - Determinism: Repeated identical runs produce bit-for-bit identical predictions and equity curves (`norm == 0`).
 - Regenerating sample outputs reproduces identical numbers.
 
@@ -204,19 +212,23 @@ Tests:
     - **Dynamic Quantitative Research Interpretation:** Automated, dynamic synthesis covering benchmark winners, naive comparison, directional timing, sample power, and caveats.
     - **Backtesting Realism Metrics:** Market exposure %, cumulative costs paid, Calmar ratio, and profit factor.
     - **Real Market Data Integration (Twelve Data):** Live OHLCV acquisition for US (NASDAQ, NYSE) and Indian (NSE, BSE) stocks via native Scilab `http_get` and `fromJSON`, with 4-hour local caching, offline mock fixtures, explicit error mapping (HTTP 429 rate limit, 404 symbol, 401 auth), and strict no-silent-fallback guarantees.
-    - **Verified Scilab 2026.1.0 Runtime:** 427 automated test checks passing with zero failures on Windows.
+11. **Phase 2: Ridge Regression (L2-Regularized Technical & Return Model):**
+    - **Tikhonov Regularization:** Native closed-form solution $\beta = (Z^TZ + \lambda I^*)^{-1} Z^Ty$ eliminating OLS multicollinearity and coefficient variance inflation.
+    - **13 Engineered Technical Features:** 1d/3d/5d returns, MA5/MA10 oscillators, normalized Parkinson range $(H-L)/C$, bar position, volume ratio (10d SMA), lags 1-3, and 5d volatility.
+    - **Empirical Breakthrough on US Equities:** On AAPL (NASDAQ), Ridge achieves **0.5667 test RMSE** (a 53.6% error reduction vs Naive 1.2205 and 42.9% vs OLS LR 0.9923) with **69.2% directional timing accuracy**.
+    - **Honest Random-Walk Reporting:** Plainly identifies when persistence models dominate in random-walk regimes (e.g. INFY, Blue Chip) rather than claiming artificial superiority.
+    - **Verified Scilab 2026.1.0 Runtime:** 530 automated test assertions passing with zero failures.
 
 # 17. Files
 
 ```
 01_Source_Code/scilab_gui_app/  gui_app.sce  model_engine.sce  market_data_adapter.sce
                                 test_model_engine.sce  test_market_data_adapter.sce
-                                test_gui_workflow.sce  generate_sample_outputs.sce
-                                MANUAL_TEST_CHECKLIST.md  sample_data/  outputs/  tools/
-02_Documentation/  StockVision_README.pdf  StockVision_Project_Report.pdf  source/ (Markdown + CSS + build script for the PDFs)
-03_Demo_Video/  Scilab_demo_video.mp4 (1:48 captioned screen recording, no voice-over)  DEMO_VIDEO_SCRIPT_V2.md
-04_Problem_Statement/  StockVision_Problem_Statement.pdf
-05_GUI_Screenshots/  01..09 PNG        06_Sample_Outputs/  CSV/TXT samples
+                                test_gui_workflow.sce  test_forecasting_phase2.sce
+                                generate_sample_outputs.sce  sample_data/  outputs/  tools/
+PHASE1_PRODUCTION_READINESS_AUDIT.md  PHASE2_FORECASTING_VALIDATION.md
+02_Documentation/  StockVision_README.pdf  StockVision_Project_Report.pdf
+03_Demo_Video/  Scilab_demo_video.mp4  05_GUI_Screenshots/  06_Sample_Outputs/
 config/  market_data_config.json.example
 ```
                                 test_gui_workflow.sce  generate_sample_outputs.sce

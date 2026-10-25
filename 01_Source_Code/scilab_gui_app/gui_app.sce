@@ -242,6 +242,8 @@ function nm = model_display_name(key)
     case "LR" then nm = "Linear Regression";
     case "AR" then nm = "AR(" + string(app_state.ar_lookback) + ")";
     case "ES" then nm = "Exp. Smoothing";
+    case "RIDGE" then nm = "Ridge Regression (L2)";
+    case "NAIVE" then nm = "Naive baseline";
     else nm = key;
     end
 endfunction
@@ -392,18 +394,19 @@ function draw_comparison_chart()
         return
     end
     M = app_state.cmp.M; lab = app_state.cmp.labels;
+    nm = size(M, 1);
     restore_axes(ax, gui.ph_cmp);
     vals = [M(:, 1), M(:, 6)];
-    bar(1:4, vals, 0.7, "grouped");
+    bar(1:nm, vals, 0.7, "grouped");
     e = gce();
     e.children(2).background = color(43, 108, 176);    // first series: test window (steel blue)
     e.children(1).background = color(221, 107, 32);    // second series: walk-forward (warm amber)
     ymax = max(vals) * 1.25;
-    ax.data_bounds = [0.4, 0; 4.6, ymax];
+    ax.data_bounds = [0.4, 0; nm + 0.6, ymax];
     ax.tight_limits = "on";
     ax.font_size = 2;
-    ax.x_ticks = tlist(["ticks", "locations", "labels"], (1:4)', lab(:));
-    for i = 1:4
+    ax.x_ticks = tlist(["ticks", "locations", "labels"], (1:nm)', lab(:));
+    for i = 1:nm
         xstring(i - 0.33, vals(i, 1) + ymax * 0.015, msprintf("%.2f", vals(i, 1)));
         t = gce(); t.font_size = 2;
         xstring(i + 0.03, vals(i, 2) + ymax * 0.015, msprintf("%.2f", vals(i, 2)));
@@ -766,7 +769,7 @@ endfunction
 function on_model_changed()
     global gui app_state
     idx = get(gui.model_popup, "value");
-    keys = ["LR", "AR", "ES"];
+    keys = ["LR", "AR", "ES", "RIDGE"];
     app_state.model_type = keys(idx);
     invalidate("model", "Model changed -- click Run Analysis.");
 endfunction
@@ -868,9 +871,9 @@ function ensure_comparison()
     [ok, lb, nf, msg] = read_model_params();
     if ~ok then error(msg); end
     app_state.ar_lookback = lb; app_state.n_folds = nf;
-    set_status("Training Naive, Linear Regression, AR and Exponential Smoothing...");
-    set_status("Running walk-forward validation...");
-    app_state.cmp = compare_models(app_state.data, app_state.split_ratio, lb, ES_ALPHA, ES_BETA, nf);
+    include_ridge = (app_state.model_type == "RIDGE");
+    set_status("Training models and running walk-forward validation...");
+    app_state.cmp = compare_models(app_state.data, app_state.split_ratio, lb, ES_ALPHA, ES_BETA, nf, include_ridge);
 endfunction
 
 
@@ -879,7 +882,7 @@ function adopt_selected_model_from_comparison()
     global app_state
     [ok, p, msg] = read_params();
     if ~ok then return; end
-    kmap = ["LR", "AR", "ES"];
+    kmap = app_state.cmp.keys(2:$);
     k = find(kmap == app_state.model_type) + 1;
     app_state.analysis = app_state.cmp.results(k);
     app_state.naive = app_state.cmp.results(1);
@@ -1199,7 +1202,7 @@ gui.btn_fetch = uicontrol(gui.fig, "style", "pushbutton", "string", "Fetch Live"
 
 mk_text("Model", LX, 0.796, LW, 0.020, %f, "left");
 gui.model_popup = uicontrol(gui.fig, "style", "popupmenu", ..
-    "string", "Linear Regression|AR Time-Series|Exponential Smoothing", ..
+    "string", "Linear Regression|AR Time-Series|Exponential Smoothing|Ridge Regression (L2)", ..
     "units", "normalized", "position", [LX 0.768 LW 0.026], "fontsize", 11, "fontname", "Segoe UI", "value", 1, ..
     "callback", "on_model_changed()", "tooltipstring", "Model analysed by Run Analysis and Run Backtest");
 
