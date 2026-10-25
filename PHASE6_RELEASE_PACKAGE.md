@@ -99,7 +99,7 @@ By default, StockVision runs in 100% offline mode with zero network dependency. 
 
 ## 3. Automated Test Suites & Regression Verification
 
-StockVision includes **6 independent test suites** and a dedicated **benchmark workflow**, totaling **762 passing assertions (0 failures, 0 skipped)**:
+StockVision includes **6 independent test suites** (666 unit-test assertions), a dedicated **benchmark workflow** (95 checks in canonical cache mode; 91 checks in offline mode), and a **full-system release gate** (52 checks), all executing with zero failures:
 
 ```powershell
 # 1. Core Model Engine Tests (311 checks)
@@ -108,7 +108,7 @@ StockVision includes **6 independent test suites** and a dedicated **benchmark w
 # 2. Market Data Adapter Tests (70 checks)
 & "C:\Program Files\scilab-2026.1.0\bin\WScilex-cli.exe" -nb -f "01_Source_Code\scilab_gui_app\test_market_data_adapter.sce"
 
-# 3. Interactive GUI Workflow Tests (56 checks)
+# 3. Interactive GUI Workflow Tests (55 checks)
 & "C:\Program Files\scilab-2026.1.0\bin\WScilex-cli.exe" -nb -f "01_Source_Code\scilab_gui_app\test_gui_workflow.sce"
 
 # 4. Phase 2 Ridge Forecasting & Validation Tests (93 checks)
@@ -120,10 +120,10 @@ StockVision includes **6 independent test suites** and a dedicated **benchmark w
 # 6. Phase 5 Statistical Integrity Tests (54 checks)
 & "C:\Program Files\scilab-2026.1.0\bin\WScilex-cli.exe" -nb -f "01_Source_Code\scilab_gui_app\test_statistical_integrity_phase5.sce"
 
-# 7. Phase 6 Reproducible Benchmark Workflow (95 checks)
+# 7. Phase 6 Reproducible Benchmark Workflow (95 checks with cache; 91 offline)
 & "C:\Program Files\scilab-2026.1.0\bin\WScilex-cli.exe" -nb -f "01_Source_Code\scilab_gui_app\run_reproducible_benchmark.sce"
 
-# 8. Full End-to-End Release Gate Verification
+# 8. Full End-to-End Release Gate Verification (54 checks with cache; 52 passed + 2 skipped offline)
 & "C:\Program Files\scilab-2026.1.0\bin\WScilex-cli.exe" -nb -f "01_Source_Code\scilab_gui_app\tools\verify_e2e_release.sce"
 ```
 
@@ -133,12 +133,16 @@ StockVision includes **6 independent test suites** and a dedicated **benchmark w
 | :--- | :--- | :---: | :---: | :---: |
 | `test_model_engine.sce` | Regression, AR, ES, signals, backtesting, intervals, exports | 311 | `0` | **PASS** |
 | `test_market_data_adapter.sce` | API schemas, ISO normalization, cache TTL, credential masking | 70 | `0` | **PASS** |
-| `test_gui_workflow.sce` | Live uicontrol callbacks, single-figure invariance, tab switching | 56 | `0` | **PASS** |
+| `test_gui_workflow.sce` | Live uicontrol callbacks, single-figure invariance, tab switching | 55 | `0` | **PASS** |
 | `test_forecasting_phase2.sce` | Ridge regression ($L_2$), 13 features, Tikhonov shrinkage | 93 | `0` | **PASS** |
 | `test_explanation_engine.sce` | Snapshot grounding, Mode A/B fallback, prompt safety | 83 | `0` | **PASS** |
 | `test_statistical_integrity_phase5.sce`| Independent hand calculation recomputations, anti-leakage invariants | 54 | `0` | **PASS** |
-| `run_reproducible_benchmark.sce` | Multi-asset benchmark execution, CSV export integrity | 95 | `0` | **PASS** |
-| **TOTAL VERIFIED ASSERTIONS** | **All Application Subsystems** | **762** | `0` | **PASS (100%)** |
+| **SUBTOTAL: 6 UNIT TEST SUITES** | **Mathematical and Functional Core Engine** | **666** | `0` | **PASS (100%)** |
+| `run_reproducible_benchmark.sce` | Multi-asset benchmark execution, CSV export integrity | 95 / 91* | `0` | **PASS** |
+| `verify_e2e_release.sce` | End-to-end full system release gate verification | 54 / 52* | `0` | **PASS** |
+| `tools/test_benchmark_nocache.sce` | Offline clean-room no-cache regression verification | 91 | `0` | **PASS** |
+
+*\* Higher check count executes when private/local market cache is present (95 benchmark assertions, 54 E2E checks); lower check count executes in clean distribution without cache (91 benchmark assertions on 5 offline datasets, 52 passed + 2 explicitly skipped E2E checks).*
 
 ---
 

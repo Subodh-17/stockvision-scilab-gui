@@ -191,8 +191,10 @@ Tests:
 - **Phase 2 Ridge Forecasting & Validation suite (`test_forecasting_phase2.sce`): 93 checks, 0 failures** verifying 13 features, anti-leakage invariants, Tikhonov conditioning, leverage-adjusted intervals, 5-model comparison, 5-model walk-forward, multi-market data (AAPL & INFY), and GUI callbacks.
 - **Engine tests (`test_model_engine.sce`): 311 checks, 0 failures** across 21 test sections under Scilab 2026.1.0 on Windows.
 - **Market data adapter tests (`test_market_data_adapter.sce`): 70 checks, 0 failures** covering API parsing, cache provenance, error sanitization, and model integration.
-- **GUI workflow test (`test_gui_workflow.sce`): 56 checks, 0 failures**, driving live uicontrol callbacks, market data fetches, tab switching, and graphics contexts.
-- **Total automated coverage: 762 verified assertions, 0 failures across 6 independent suites and benchmark workflow.**
+- **GUI workflow test (`test_gui_workflow.sce`): 55 checks, 0 failures**, driving live uicontrol callbacks, market data fetches, tab switching, and graphics contexts.
+- **Unit test suite total: 666 verified assertions (0 failures) across 6 independent suites.**
+- **Dedicated benchmark workflow (`run_reproducible_benchmark.sce`): 95 passing assertions.**
+- **Release gate verification (`verify_e2e_release.sce`): 54 checks in repository (52 passed + 2 explicitly skipped in clean release distribution without cache).**
 - Determinism: Repeated identical runs produce bit-for-bit identical predictions, explanations, and equity curves (`norm == 0`).
 - Regenerating sample outputs reproduces identical numbers.
 
@@ -239,7 +241,7 @@ Tests:
     - **Real Market Data Benchmarking:** Audited actual historical market data from Twelve Data (`AAPL_NASDAQ_120.json` and `INFY_NSE_120.json`), demonstrating that real AR(10) RMSE is **4.1958** (not 0.0066) and Naive persistence (**3.3515**) outperforms all complex models in liquid random-walk regimes.
     - **Independent Hand-Calculated Verification:** Proved that RMSE, MAE, MAPE, $R^2$, and Theil's $U_2$ formulas match manual hand calculations to within $10^{-12}$ precision.
     - **Backtest Timing & Friction Verification:** Verified 1-day execution lag, position entry timing, and $0.15\%$ total transaction friction against manual arithmetic.
-    - **Regression Test Suite:** Added `test_statistical_integrity_phase5.sce` with 54 new assertions, raising total automated coverage to **667 passing assertions (0 failures)**.
+    - **Regression Test Suite:** Added `test_statistical_integrity_phase5.sce` with 54 new assertions, raising total automated unit test coverage to **666 passing assertions (0 failures)** across all 6 suites.
     - **Audit Documentation:** Authored `PHASE5_STATISTICAL_INTEGRITY_AUDIT.md`.
 15. **Phase 6: Real-Market Benchmarking, Final UI Polish & Release Package:**
     - **Reproducible Multi-Asset Benchmark Suite:** Added `run_reproducible_benchmark.sce` evaluating real market caches (US AAPL NASDAQ, Indian INFY NSE), offline mock fixtures, and synthetic stochastic series across all 5 models under synchronized origins ($h=1$) and 5-fold walk-forward cross-validation.

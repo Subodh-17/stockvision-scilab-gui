@@ -75,9 +75,13 @@ bm_assert(%t, "Market provider connectivity probe executed cleanly without crede
 mprintf("\n--- Subsystem 2: Dataset Catalog & Provenance Verification ---\n");
 datasets = list();
 
+// Check if cache usage is disabled by environment override (for clean-room testing)
+cache_env = getenv("STOCKVISION_NO_CACHE", "0");
+cache_active = (cache_env <> "1" & cache_env <> "true");
+
 // Real Market Cache: AAPL (NASDAQ)
 real_aapl_path = APP_DIR + "../../cache/market_data/AAPL_NASDAQ_120.json";
-if isfile(real_aapl_path) then
+if cache_active & isfile(real_aapl_path) then
     d_aapl = mda_load_mock(real_aapl_path, "AAPL", "NASDAQ");
     entry = struct("data", d_aapl, "id", "REAL_AAPL_NASDAQ", "category", "REAL_MARKET_CACHED", ..
                    "symbol", "AAPL", "exchange", "NASDAQ", "currency", "USD", ..
@@ -86,11 +90,15 @@ if isfile(real_aapl_path) then
     datasets($+1) = entry;
     mprintf("  Loaded Dataset: AAPL NASDAQ (Real Market Cache, %d daily bars, %s to %s)\n", ..
             d_aapl.n, d_aapl.dates(1), d_aapl.dates($));
+elseif ~cache_active then
+    mprintf("  [OFFLINE] Real AAPL cache disabled via STOCKVISION_NO_CACHE.\n");
+else
+    mprintf("  [OFFLINE] Real AAPL cache not found at %s (using offline fallback).\n", real_aapl_path);
 end
 
 // Real Market Cache: INFY (NSE)
 real_infy_path = APP_DIR + "../../cache/market_data/INFY_NSE_120.json";
-if isfile(real_infy_path) then
+if cache_active & isfile(real_infy_path) then
     d_infy = mda_load_mock(real_infy_path, "INFY", "NSE");
     entry = struct("data", d_infy, "id", "REAL_INFY_NSE", "category", "REAL_MARKET_CACHED", ..
                    "symbol", "INFY", "exchange", "NSE", "currency", "INR", ..
@@ -99,6 +107,10 @@ if isfile(real_infy_path) then
     datasets($+1) = entry;
     mprintf("  Loaded Dataset: INFY NSE (Real Market Cache, %d daily bars, %s to %s)\n", ..
             d_infy.n, d_infy.dates(1), d_infy.dates($));
+elseif ~cache_active then
+    mprintf("  [OFFLINE] Real INFY cache disabled via STOCKVISION_NO_CACHE.\n");
+else
+    mprintf("  [OFFLINE] Real INFY cache not found at %s (using offline fallback).\n", real_infy_path);
 end
 
 // Offline Mock: AAPL (Synthetic Periodic Fixture)
@@ -140,12 +152,52 @@ if isfile(synth_tech_path) then
             d_tech.n, d_tech.dates(1), d_tech.dates($));
 end
 
+// Offline Fallback for Clean-Room Environments:
+// When cached market series are absent (e.g., in a clean release package or offline run),
+// supplement with bundled offline synthetic datasets so the benchmark evaluates a complete
+// 5-dataset multi-asset matrix (>= 4) without requiring local disk cache.
+if size(datasets) < 5 then
+    synth_blue_path = APP_DIR + "sample_data/blue_chip_stock.csv";
+    if isfile(synth_blue_path) then
+        d_blue = load_dataset(synth_blue_path);
+        entry = struct("data", d_blue, "id", "SYNTH_BLUE_CHIP", "category", "SYNTHETIC_SIMULATION", ..
+                       "symbol", "BLUE_CHIP", "exchange", "SIM", "currency", "USD", ..
+                       "provider", "StockVision Synthetic Simulator", "n_bars", d_blue.n, ..
+                       "date_start", d_blue.dates(1), "date_end", d_blue.dates($));
+        datasets($+1) = entry;
+        mprintf("  Loaded Dataset: Blue Chip (Offline Synthetic CSV, %d daily bars, %s to %s)\n", ..
+                d_blue.n, d_blue.dates(1), d_blue.dates($));
+    end
+end
+
+if size(datasets) < 5 then
+    synth_vol_path = APP_DIR + "sample_data/volatile_stock.csv";
+    if isfile(synth_vol_path) then
+        d_vol = load_dataset(synth_vol_path);
+        entry = struct("data", d_vol, "id", "SYNTH_VOLATILE", "category", "SYNTHETIC_SIMULATION", ..
+                       "symbol", "VOLATILE", "exchange", "SIM", "currency", "USD", ..
+                       "provider", "StockVision Synthetic Simulator", "n_bars", d_vol.n, ..
+                       "date_start", d_vol.dates(1), "date_end", d_vol.dates($));
+        datasets($+1) = entry;
+        mprintf("  Loaded Dataset: Volatile Stock (Offline Synthetic CSV, %d daily bars, %s to %s)\n", ..
+                d_vol.n, d_vol.dates(1), d_vol.dates($));
+    end
+end
+
 bm_assert(size(datasets) >= 4, "Benchmark catalog assembled at least 4 heterogeneous multi-asset series");
 
 // 3. Run Controlled Benchmark Execution Across All Datasets & All 5 Models
 mprintf("\n--- Subsystem 3: 5-Model Controlled Benchmark Execution ---\n");
 
-out_dir = APP_DIR + "../../06_Sample_Outputs/benchmarks/";
+out_env = getenv("STOCKVISION_BENCHMARK_OUT", "");
+if out_env <> "" then
+    out_dir = out_env;
+    if part(out_dir, length(out_dir)) <> filesep() then out_dir = out_dir + filesep(); end
+else
+    out_parent = APP_DIR + "../../06_Sample_Outputs/";
+    if ~isdir(out_parent) then mkdir(out_parent); end
+    out_dir = APP_DIR + "../../06_Sample_Outputs/benchmarks/";
+end
 if ~isdir(out_dir) then mkdir(out_dir); end
 
 summary_csv_path = out_dir + "benchmark_summary.csv";

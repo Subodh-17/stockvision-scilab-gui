@@ -14,15 +14,26 @@ mprintf("\n=====================================================================
 mprintf("  StockVision Phase 4: Full-System Forensic Audit & E2E Verification\n");
 mprintf("======================================================================\n\n");
 
+global audit_passed audit_failures audit_skipped;
+audit_passed = 0;
 audit_failures = 0;
+audit_skipped = 0;
+
 function audit_assert(cond, desc)
-    global audit_failures;
+    global audit_passed audit_failures;
     if cond then
         mprintf("  [PASS] %s\n", desc);
+        audit_passed = audit_passed + 1;
     else
         mprintf("  [FAIL] %s\n", desc);
         audit_failures = audit_failures + 1;
     end
+endfunction
+
+function audit_skip(desc, reason)
+    global audit_skipped;
+    mprintf("  [SKIP] %s (Reason: %s)\n", desc, reason);
+    audit_skipped = audit_skipped + 1;
 endfunction
 
 // --- Subsystem 1: Offline Datasets ---
@@ -79,8 +90,17 @@ r_aapl_ar = cmp_aapl.results(3);
 audit_assert(r_aapl_ar.metrics.rmse < 0.05, "Forensic Audit: AR(10) fits mock 5-day delta periodicity with RMSE < 0.05 (" + string(r_aapl_ar.metrics.rmse) + ")");
 
 // Real Market Data Verification (from local cache when available)
-real_aapl_cache = APP_DIR + "../cache/market_data/AAPL_NASDAQ_120.json";
-if isfile(real_aapl_cache) then
+cache_env = getenv("STOCKVISION_NO_CACHE", "0");
+cache_active = (cache_env <> "1" & cache_env <> "true");
+
+real_aapl_cache = "";
+if isfile(APP_DIR + "../../cache/market_data/AAPL_NASDAQ_120.json") then
+    real_aapl_cache = APP_DIR + "../../cache/market_data/AAPL_NASDAQ_120.json";
+elseif isfile(APP_DIR + "../cache/market_data/AAPL_NASDAQ_120.json") then
+    real_aapl_cache = APP_DIR + "../cache/market_data/AAPL_NASDAQ_120.json";
+end
+
+if cache_active & real_aapl_cache <> "" then
     d_real_aapl = mda_load_mock(real_aapl_cache, "AAPL", "NASDAQ");
     cmp_real_aapl = compare_models(d_real_aapl, 0.8, 10, 0.3, 0.1, 5, %t);
     mprintf("    Real AAPL (120 bars) Test RMSE: Naive=%.4f, LR=%.4f, AR=%.4f, ES=%.4f, Ridge=%.4f\n", ..
@@ -88,6 +108,10 @@ if isfile(real_aapl_cache) then
             cmp_real_aapl.results(4).metrics.rmse, cmp_real_aapl.results(5).metrics.rmse);
     audit_assert(cmp_real_aapl.results(3).metrics.rmse > 3.0, "Real AAPL: AR(10) produces realistic market RMSE > 3.0 (" + string(cmp_real_aapl.results(3).metrics.rmse) + ")");
     audit_assert(cmp_real_aapl.results(1).metrics.rmse <= cmp_real_aapl.results(3).metrics.rmse, "Real AAPL: Naive random walk baseline beats unregularized AR(10)");
+else
+    skip_reason = "Private/local cached market data unavailable in clean release distribution";
+    audit_skip("Real AAPL: AR(10) produces realistic market RMSE > 3.0", skip_reason);
+    audit_skip("Real AAPL: Naive random walk baseline beats unregularized AR(10)", skip_reason);
 end
 
 // 3. INFY NSE
@@ -189,13 +213,15 @@ audit_assert(isfile(bm_report), "Canonical benchmark_report.txt verified");
 
 mprintf("\n======================================================================\n");
 mprintf("  E2E Audit Verification Summary\n");
-mprintf("  Total Audit Failures: %d\n", audit_failures);
+mprintf("  Total Passed Checks : %d\n", audit_passed);
+mprintf("  Total Failed Checks : %d\n", audit_failures);
+mprintf("  Total Skipped Checks: %d\n", audit_skipped);
 mprintf("======================================================================\n");
 
 if audit_failures > 0 then
     error("E2E Audit Verification encountered " + string(audit_failures) + " failure(s).");
     exit(1);
 else
-    mprintf("ALL END-TO-END WORKFLOW SUBSYSTEMS VERIFIED AND RELEASE READY.\n");
+    mprintf("ALL REQUIRED END-TO-END WORKFLOW SUBSYSTEMS VERIFIED AND RELEASE READY.\n");
     exit(0);
 end

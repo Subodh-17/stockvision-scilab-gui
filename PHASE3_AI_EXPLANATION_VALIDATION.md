@@ -214,4 +214,4 @@ To independently run the complete test suite headlessly on Windows with Scilab 2
 ---
 
 *Certified by StockVision Quantitative Research & QA Team.*  
-*Artifact stored at `C:\Users\Subodh\.gemini\antigravity\brain\34e86ae3-d52e-4f24-a305-d6f739630b42\phase3_ai_explanation_validation.md`.*
+*Artifact stored at `docs/artifacts/phase3_ai_explanation_validation.md`.*
