@@ -3,6 +3,7 @@ __pycache__/
 *.tmp
 *.log
 !verification_logs/*.log
+*.zip
 
 # Scilab runtime & temporary files
 SCI_TMP_*

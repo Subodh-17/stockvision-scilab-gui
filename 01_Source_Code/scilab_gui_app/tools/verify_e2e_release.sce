@@ -180,6 +180,13 @@ audit_assert(strindex(strcat(csv_content, " "), "Metric,Value") <> [], "CSV file
 audit_assert(strindex(strcat(csv_content, " "), "Theil_U2_vs_Naive") <> [], "CSV contains Theil_U2_vs_Naive row");
 audit_assert(strindex(strcat(csv_content, " "), "WalkForward_RMSE_Ridge") <> [], "CSV contains WalkForward_RMSE_Ridge row for 5-model comparison");
 
+// --- Subsystem 9: Reproducible Benchmark Verification ---
+mprintf("\n--- Subsystem 9: Reproducible Benchmark Verification ---\n");
+bm_summary = APP_DIR + "../../06_Sample_Outputs/benchmarks/benchmark_summary.csv";
+bm_report = APP_DIR + "../../06_Sample_Outputs/benchmarks/benchmark_report.txt";
+audit_assert(isfile(bm_summary), "Canonical benchmark_summary.csv verified");
+audit_assert(isfile(bm_report), "Canonical benchmark_report.txt verified");
+
 mprintf("\n======================================================================\n");
 mprintf("  E2E Audit Verification Summary\n");
 mprintf("  Total Audit Failures: %d\n", audit_failures);

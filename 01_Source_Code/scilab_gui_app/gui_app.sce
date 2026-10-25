@@ -459,7 +459,9 @@ function draw_equity_chart()
     ax.font_size = 2;
     set_date_ticks(ax, d.dates(r.test_idx), 1, n);
     ax.title.text = "Portfolio value on the test window (same period for both)"; ax.title.font_size = 3;
-    ax.y_label.text = "Value"; ax.x_label.text = "";
+    cur_unit = "USD";
+    if isfield(d, "currency") & d.currency <> "" then cur_unit = d.currency; end
+    ax.y_label.text = "Value (" + cur_unit + ")"; ax.x_label.text = "";
     ax.y_label.font_size = 2;
     lg = legend(labels, "in_lower_right"); lg.font_size = 2;
     ax.margins = [0.17, 0.06, 0.04, 0.17];
@@ -773,6 +775,7 @@ function on_symbol_changed()
     global gui app_state
     sym = stripblanks(get(gui.ed_symbol, "string"));
     app_state.symbol = convstr(sym, "u");
+    set_status("Symbol changed to [" + app_state.symbol + "]. Click Fetch Live to retrieve market data.", "info");
 endfunction
 
 
@@ -1296,6 +1299,12 @@ uimenu(m_file, "label", "Fetch Real Market Data...", "callback", "on_fetch_marke
 uimenu(m_file, "label", "Load Custom CSV...", "callback", "on_load_custom_csv()");
 uimenu(m_file, "label", "Export Results...", "callback", "on_export()");
 uimenu(m_file, "label", "Exit", "callback", "close(gui.fig)");
+m_analysis = uimenu(gui.fig, "label", "Analysis");
+uimenu(m_analysis, "label", "Run Analysis", "callback", "on_run_analysis()");
+uimenu(m_analysis, "label", "Compare Models", "callback", "on_compare()");
+uimenu(m_analysis, "label", "Run Backtest", "callback", "on_run_backtest()");
+uimenu(m_analysis, "label", "Walk-Forward Validation", "callback", "on_walk_forward()");
+uimenu(m_analysis, "label", "Explain Forecast (AI Assistant)", "callback", "on_explain()");
 m_help = uimenu(gui.fig, "label", "Help");
 uimenu(m_help, "label", "Model Info", "callback", "on_model_info()");
 uimenu(m_help, "label", "About", "callback", "on_about()");

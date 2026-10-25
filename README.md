@@ -185,13 +185,14 @@ Tests:
 
 # 15. Verification summary
 
+- **Phase 6 Reproducible Benchmarking suite (`run_reproducible_benchmark.sce`): 95 checks, 0 failures** across real-market cached equities (US AAPL NASDAQ, India INFY NSE), offline periodic fixtures, and synthetic stochastic series, exporting canonical summary and detailed fold CSVs.
 - **Phase 5 Statistical Integrity suite (`test_statistical_integrity_phase5.sce`): 54 checks, 0 failures** verifying target alignment, AR lag indexing, independent metric hand-recomputation, flat-move guards, equal test counts, backtest execution lag, and forensic proof of the AR(10) mock anomaly vs real market data.
 - **Phase 3 Explanation Assistant suite (`test_explanation_engine.sce`): 83 checks, 0 failures** verifying structured snapshots, multi-model disagreement metrics, Theil U interpretation, prompt grounding, mocked AI response parsing, network failure fallback to Mode A, and GUI integration.
 - **Phase 2 Ridge Forecasting & Validation suite (`test_forecasting_phase2.sce`): 93 checks, 0 failures** verifying 13 features, anti-leakage invariants, Tikhonov conditioning, leverage-adjusted intervals, 5-model comparison, 5-model walk-forward, multi-market data (AAPL & INFY), and GUI callbacks.
 - **Engine tests (`test_model_engine.sce`): 311 checks, 0 failures** across 21 test sections under Scilab 2026.1.0 on Windows.
 - **Market data adapter tests (`test_market_data_adapter.sce`): 70 checks, 0 failures** covering API parsing, cache provenance, error sanitization, and model integration.
 - **GUI workflow test (`test_gui_workflow.sce`): 56 checks, 0 failures**, driving live uicontrol callbacks, market data fetches, tab switching, and graphics contexts.
-- **Total automated coverage: 667 test assertions, 0 failures across 6 independent suites.**
+- **Total automated coverage: 762 verified assertions, 0 failures across 6 independent suites and benchmark workflow.**
 - Determinism: Repeated identical runs produce bit-for-bit identical predictions, explanations, and equity curves (`norm == 0`).
 - Regenerating sample outputs reproduces identical numbers.
 
@@ -217,7 +218,7 @@ Tests:
 11. **Phase 2: Ridge Regression (L2-Regularized Technical & Return Model):**
     - **Tikhonov Regularization:** Native closed-form solution $\beta = (Z^TZ + \lambda I^*)^{-1} Z^Ty$ eliminating OLS multicollinearity and coefficient variance inflation.
     - **13 Engineered Technical Features:** 1d/3d/5d returns, MA5/MA10 oscillators, normalized Parkinson range $(H-L)/C$, bar position, volume ratio (10d SMA), lags 1-3, and 5d volatility.
-    - **Empirical Breakthrough on US Equities:** On AAPL (NASDAQ), Ridge achieves **0.5667 test RMSE** (a 53.6% error reduction vs Naive 1.2205 and 42.9% vs OLS LR 0.9923) with **69.2% directional timing accuracy**.
+    - **Ridge Regularization on Synthetic/Mock Fixtures:** On AAPL (NASDAQ offline mock fixture), Ridge achieves **0.5667 test RMSE** (vs Naive 1.2205) with 69.2% directional accuracy. On genuine historical AAPL equity data, Naive persistence ($RMSE = 3.3515$) outperforms all statistical models, demonstrating the critical importance of benchmarking against real-world price data.
     - **Honest Random-Walk Reporting:** Plainly identifies when persistence models dominate in random-walk regimes (e.g. INFY, Blue Chip) rather than claiming artificial superiority.
     - **Verified Scilab 2026.1.0 Runtime:** 530 automated test assertions passing with zero failures.
 12. **Phase 3: AI Explanation Assistant & Forecast Intelligence:**
@@ -240,6 +241,14 @@ Tests:
     - **Backtest Timing & Friction Verification:** Verified 1-day execution lag, position entry timing, and $0.15\%$ total transaction friction against manual arithmetic.
     - **Regression Test Suite:** Added `test_statistical_integrity_phase5.sce` with 54 new assertions, raising total automated coverage to **667 passing assertions (0 failures)**.
     - **Audit Documentation:** Authored `PHASE5_STATISTICAL_INTEGRITY_AUDIT.md`.
+15. **Phase 6: Real-Market Benchmarking, Final UI Polish & Release Package:**
+    - **Reproducible Multi-Asset Benchmark Suite:** Added `run_reproducible_benchmark.sce` evaluating real market caches (US AAPL NASDAQ, Indian INFY NSE), offline mock fixtures, and synthetic stochastic series across all 5 models under synchronized origins ($h=1$) and 5-fold walk-forward cross-validation.
+    - **Regime-Dependent Empirical Insights:** Demonstrated that while Naive persistence wins in choppy/volatile regimes (AAPL: 3.3515 vs Ridge 4.5342), autoregressive models capture persistent momentum over trending test windows (INFY: AR 22.2781 vs Naive 22.7812). Multi-fold walk-forward analysis confirms Naive baseline mean superiority across full cycles.
+    - **Canonical Benchmark Exports:** Saved `benchmark_summary.csv`, `benchmark_detailed_folds.csv`, and `benchmark_report.txt` in `06_Sample_Outputs/benchmarks/`.
+    - **GUI Polish & Native Menu Bar:** Added native desktop `Analysis` menu, currency-aware y-axis labels on the equity chart, active symbol edit feedback, and verified single-figure UI stability.
+    - **Automated Windows Screenshot Capture:** Updated `tools/capture_screens.sce` to use native Scilab `xs2png()`, producing genuine application screenshots for all primary workflows.
+    - **Clean Release Packaging:** Created distribution archive `StockVision_Release_Package_V3.zip` with zero leakage of private keys, cache files, or git metadata.
+    - **Release Package Documentation:** Authored `PHASE6_RELEASE_PACKAGE.md`.
 
 # 17. Files
 
@@ -250,10 +259,11 @@ Tests:
                                 test_gui_workflow.sce  test_forecasting_phase2.sce
                                 test_explanation_engine.sce
                                 test_statistical_integrity_phase5.sce
+                                run_reproducible_benchmark.sce
                                 generate_sample_outputs.sce  sample_data/  outputs/  tools/
                                 fixtures/mock_gemini_response.json
 PHASE1_PRODUCTION_READINESS_AUDIT.md  PHASE2_FORECASTING_VALIDATION.md  PHASE3_AI_EXPLANATION_VALIDATION.md
-PHASE4_RELEASE_READINESS_AUDIT.md  PHASE5_STATISTICAL_INTEGRITY_AUDIT.md
+PHASE4_RELEASE_READINESS_AUDIT.md  PHASE5_STATISTICAL_INTEGRITY_AUDIT.md  PHASE6_RELEASE_PACKAGE.md
 02_Documentation/  StockVision_README.pdf  StockVision_Project_Report.pdf  source/
 03_Demo_Video/  Scilab_demo_video.mp4  05_GUI_Screenshots/  06_Sample_Outputs/
 config/  market_data_config.json.example  ai_config.json.example
