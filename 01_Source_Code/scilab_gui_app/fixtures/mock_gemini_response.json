@@ -1,0 +1,21 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "parts": [
+          {
+            "text": "EXECUTIVE SUMMARY\nBased on the quantitative snapshot for AAPL (NASDAQ, USD), the active Ridge Regression model forecasts a next-day closing price of $182.45 (+0.80% predicted change), triggering a BUY signal above the +0.50% threshold. The 95% Student-t prediction interval spans [$179.20 - $185.70], reflecting bounded uncertainty across the 1-day forecast horizon.\n\nMODEL DISAGREEMENT & CONSENSUS\nA moderate bullish lean is observed across candidate models (3 of 4 forecasting upward movement). The absolute spread across all model forecasts is $2.15 (1.18% of mean forecast), indicating tight structural agreement without extreme divergence.\n\nVALIDATION & BENCHMARK PERFORMANCE\nOn the un-shuffled chronological test window (65 observations), Ridge Regression achieved a Test RMSE of 0.567 and Theil's U2 of 0.464 relative to naive persistence. Because U2 < 1.0, the model demonstrates genuine predictive skill over the random walk baseline.\n\nUNCERTAINTY & DATA QUALITY\nThe prediction interval envelope is 3.56% of current price, reflecting measured market volatility. The dataset consists of 65 clean daily bars without return spikes or volume gaps.\n\nMETHODOLOGICAL LIMITATIONS\nPast statistical performance does not guarantee future results. Market regimes can shift abruptly during unexpected macro events. Backtest profits assume ideal execution with 0.10% cost and 0.05% slippage."
+          }
+        ],
+        "role": "model"
+      },
+      "finishReason": "STOP",
+      "index": 0
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 240,
+    "candidatesTokenCount": 285,
+    "totalTokenCount": 525
+  }
+}

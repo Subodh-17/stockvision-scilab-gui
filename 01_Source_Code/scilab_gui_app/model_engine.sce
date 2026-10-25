@@ -2359,6 +2359,12 @@ function lines = build_report_lines(rep)
         d = format_backtest(rep.bt, rep.analysis.name);
         for k = 1:size(d, 1); lines = append_line(lines, d(k)); end
     end
+    if isfield(rep, "explanation") & size(rep.explanation, "*") > 0 then
+        lines = append_line(lines, rule);
+        lines = append_line(lines, "FORECAST INTELLIGENCE & EXPLANATION");
+        d = rep.explanation;
+        for k = 1:size(d, 1); lines = append_line(lines, d(k)); end
+    end
     lines = append_line(lines, rule);
     lines = append_line(lines, "Educational tool, not financial advice. Bundled datasets are");
     lines = append_line(lines, "synthetic. Historical results do not predict future returns.");

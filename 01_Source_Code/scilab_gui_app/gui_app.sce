@@ -25,6 +25,7 @@ end
 global APP_DIR;
 exec(APP_DIR + "model_engine.sce", -1);
 exec(APP_DIR + "market_data_adapter.sce", -1);
+exec(APP_DIR + "explanation_engine.sce", -1);
 
 global gui app_state gui_quiet ES_ALPHA ES_BETA GUI_BG GUI_HEAD;
 if ~exists("gui_quiet") | isempty(gui_quiet) then gui_quiet = %f; end   // %t: print instead of dialogs
@@ -62,8 +63,11 @@ app_state.signal = [];
 app_state.cmp = [];          // compare_models result (all models + walk-forward)
 app_state.bt = [];           // run_backtest result for the analysed model
 app_state.show_ma = %t;
-app_state.info_tab = "dq";   // top-right panel: "dq", "asm" or "interp"
+app_state.info_tab = "dq";   // top-right panel: "dq", "asm", "interp", or "ai"
 app_state.info_dq = ""; app_state.info_asm = ""; app_state.info_interp = "";
+app_state.info_ai = ["No analysis yet.", " ", "1. Pick a dataset and model.", "2. Click Run Analysis.", "3. Click Explain Forecast or view AI Insights."];
+app_state.ai_mode = "offline";
+app_state.ai_explanation = [];
 
 // Palette -- Executive Financial Analytics Light Theme
 GUI_BG = [0.94 0.95 0.97];              // Soft neutral dashboard canvas
@@ -227,6 +231,7 @@ function set_button_states()
     set(gui.btn_compare, "enable", tf_str(have_data));
     set(gui.btn_wf, "enable", tf_str(have_data));
     set(gui.btn_backtest, "enable", tf_str(have_an));
+    set(gui.btn_explain, "enable", tf_str(have_an));
     set(gui.btn_export, "enable", tf_str(have_an));
 endfunction
 
@@ -479,7 +484,7 @@ endfunction
 
 
 function show_info_tab(name)
-    // Top-right panel shows data quality, assumptions, or research interpretation.
+    // Top-right panel shows data quality, assumptions, research interpretation, or AI insights.
     global gui app_state GUI_TAB_ACT GUI_TAB_INACT
     app_state.info_tab = name;
     TAB_ACT_BG = [1 1 1];
@@ -491,16 +496,30 @@ function show_info_tab(name)
         set(gui.tab_asm, "fontweight", "bold", "backgroundcolor", TAB_ACT_BG, "foregroundcolor", TAB_ACT_FG);
         set(gui.tab_dq, "fontweight", "normal", "backgroundcolor", TAB_INACT_BG, "foregroundcolor", TAB_INACT_FG);
         set(gui.tab_interp, "fontweight", "normal", "backgroundcolor", TAB_INACT_BG, "foregroundcolor", TAB_INACT_FG);
+        set(gui.tab_ai, "fontweight", "normal", "backgroundcolor", TAB_INACT_BG, "foregroundcolor", TAB_INACT_FG);
     elseif name == "interp" then
         set_list(gui.lb_info, app_state.info_interp);
         set(gui.tab_interp, "fontweight", "bold", "backgroundcolor", TAB_ACT_BG, "foregroundcolor", TAB_ACT_FG);
         set(gui.tab_dq, "fontweight", "normal", "backgroundcolor", TAB_INACT_BG, "foregroundcolor", TAB_INACT_FG);
         set(gui.tab_asm, "fontweight", "normal", "backgroundcolor", TAB_INACT_BG, "foregroundcolor", TAB_INACT_FG);
+        set(gui.tab_ai, "fontweight", "normal", "backgroundcolor", TAB_INACT_BG, "foregroundcolor", TAB_INACT_FG);
+    elseif name == "ai" | name == "insights" then
+        if size(app_state.info_ai, "*") <= 1 & has(app_state.analysis) then
+            refresh_ai_insights();
+        end
+        set_list(gui.lb_info, app_state.info_ai);
+        set(gui.tab_ai, "fontweight", "bold", "backgroundcolor", TAB_ACT_BG, "foregroundcolor", TAB_ACT_FG);
+        set(gui.tab_dq, "fontweight", "normal", "backgroundcolor", TAB_INACT_BG, "foregroundcolor", TAB_INACT_FG);
+        set(gui.tab_asm, "fontweight", "normal", "backgroundcolor", TAB_INACT_BG, "foregroundcolor", TAB_INACT_FG);
+        set(gui.tab_interp, "fontweight", "normal", "backgroundcolor", TAB_INACT_BG, "foregroundcolor", TAB_INACT_FG);
     else
+        name = "dq";
+        app_state.info_tab = "dq";
         set_list(gui.lb_info, app_state.info_dq);
         set(gui.tab_dq, "fontweight", "bold", "backgroundcolor", TAB_ACT_BG, "foregroundcolor", TAB_ACT_FG);
         set(gui.tab_asm, "fontweight", "normal", "backgroundcolor", TAB_INACT_BG, "foregroundcolor", TAB_INACT_FG);
         set(gui.tab_interp, "fontweight", "normal", "backgroundcolor", TAB_INACT_BG, "foregroundcolor", TAB_INACT_FG);
+        set(gui.tab_ai, "fontweight", "normal", "backgroundcolor", TAB_INACT_BG, "foregroundcolor", TAB_INACT_FG);
     end
 endfunction
 
@@ -551,6 +570,39 @@ function refresh_interpretation()
 endfunction
 
 
+function refresh_ai_insights()
+    global gui app_state
+    if ~has(app_state.data) then
+        app_state.info_ai = ["No dataset loaded."];
+    elseif ~has(app_state.analysis) then
+        app_state.info_ai = ["No analysis yet.", " ", "1. Pick a dataset and model.", "2. Click Run Analysis.", "3. Click Explain Forecast or view AI Insights."];
+    else
+        [ok, p, msg] = read_params();
+        if ~ok then p = struct("buy", 0.5, "sell", -0.5); end
+        wf_data = [];
+        if isfield(app_state, "cmp") && has(app_state.cmp) && isfield(app_state.cmp, "wf") then
+            wf_data = app_state.cmp.wf;
+        end
+        bt_data = [];
+        if isfield(app_state, "bt") && has(app_state.bt) then
+            bt_data = app_state.bt;
+        end
+        cmp_data = [];
+        if isfield(app_state, "cmp") && has(app_state.cmp) then
+            cmp_data = app_state.cmp;
+        end
+        nv_data = [];
+        if isfield(app_state, "naive") && has(app_state.naive) then
+            nv_data = app_state.naive;
+        end
+        lines = ee_explain(app_state.data, app_state.analysis, nv_data, cmp_data, wf_data, bt_data, p, app_state.ai_mode);
+        app_state.info_ai = lines;
+        app_state.ai_explanation = lines;
+    end
+    if app_state.info_tab == "ai" | app_state.info_tab == "insights" then show_info_tab("ai"); end
+endfunction
+
+
 function refresh_results()
     global gui app_state
     if ~has(app_state.analysis) then
@@ -590,7 +642,8 @@ endfunction
 
 function refresh_all()
     global gui
-    refresh_dq(); refresh_assumptions(); refresh_interpretation(); refresh_results(); refresh_comparison(); refresh_backtest();
+    refresh_dq(); refresh_assumptions(); refresh_interpretation(); refresh_ai_insights();
+    refresh_results(); refresh_comparison(); refresh_backtest();
     gui.fig.immediate_drawing = "off";
     draw_main_chart(); draw_comparison_chart(); draw_equity_chart();
     gui.fig.immediate_drawing = "on";
@@ -668,12 +721,18 @@ function invalidate(level, why)
     case "all" then
         app_state.analysis = []; app_state.naive = []; app_state.signal = [];
         app_state.cmp = []; app_state.bt = [];
+        app_state.ai_explanation = [];
+        app_state.info_ai = ["No analysis yet.", " ", "1. Pick a dataset and model.", "2. Click Run Analysis.", "3. Click Explain Forecast or view AI Insights."];
     case "model" then
         app_state.analysis = []; app_state.naive = []; app_state.signal = []; app_state.bt = [];
+        app_state.ai_explanation = [];
+        app_state.info_ai = ["No analysis yet.", " ", "1. Pick a dataset and model.", "2. Click Run Analysis.", "3. Click Explain Forecast or view AI Insights."];
     case "cmp" then
         app_state.cmp = [];
+        app_state.ai_explanation = [];
     case "bt" then
         app_state.bt = [];
+        app_state.ai_explanation = [];
     end
     refresh_all();
     if argn(2) >= 2 then set_status(why, "info"); end
@@ -953,6 +1012,66 @@ function on_run_backtest()
 endfunction
 
 
+function on_ai_mode_changed()
+    global gui app_state
+    v = get(gui.ai_mode_popup, "value");
+    if v == 2 then
+        app_state.ai_mode = "ai";
+        set_status("Explanation mode: AI Assistant (Google Gemini Cloud API / fallback enabled).", "info");
+    else
+        app_state.ai_mode = "offline";
+        set_status("Explanation mode: Deterministic Offline (zero network / pure Scilab).", "info");
+    end
+    app_state.ai_explanation = [];
+    if app_state.info_tab == "ai" | app_state.info_tab == "insights" then
+        refresh_ai_insights();
+    end
+endfunction
+
+
+function on_explain()
+    global gui app_state
+    if ~has(app_state.data) then set_status("Load a dataset first.", "error"); return; end
+    if ~has(app_state.analysis) then set_status("Click Run Analysis first before explaining.", "error"); return; end
+    [ok, p, msg] = read_params();
+    if ~ok then p = struct("buy", 0.5, "sell", -0.5); end
+    set_status("Generating forecast explanation (" + app_state.ai_mode + ")...");
+    drawnow();
+    try
+        wf_data = [];
+        if isfield(app_state, "cmp") && has(app_state.cmp) && isfield(app_state.cmp, "wf") then
+            wf_data = app_state.cmp.wf;
+        end
+        bt_data = [];
+        if isfield(app_state, "bt") && has(app_state.bt) then
+            bt_data = app_state.bt;
+        end
+        cmp_data = [];
+        if isfield(app_state, "cmp") && has(app_state.cmp) then
+            cmp_data = app_state.cmp;
+        end
+        nv_data = [];
+        if isfield(app_state, "naive") && has(app_state.naive) then
+            nv_data = app_state.naive;
+        end
+        [lines, status_msg, used_mode] = ee_explain(app_state.data, app_state.analysis, nv_data, cmp_data, wf_data, bt_data, p, app_state.ai_mode);
+        app_state.info_ai = lines;
+        app_state.ai_explanation = lines;
+        show_info_tab("ai");
+        if used_mode == "AI_GEMINI_LIVE" | used_mode == "AI_GEMINI_MOCK" then
+            set_status("Forecast explanation generated via Google Gemini AI Assistant.", "ok");
+        elseif used_mode == "FALLBACK_TO_OFFLINE" then
+            set_status("AI request unavailable -> Reverted to Deterministic Offline briefing.", "info");
+        else
+            set_status("Deterministic offline quantitative briefing generated.", "ok");
+        end
+    catch
+        err = lasterror();
+        set_status("Explanation error: " + err, "error");
+    end
+endfunction
+
+
 function rep = build_rep()
     // Everything an export needs, taken from the current dashboard state.
     global app_state ES_ALPHA ES_BETA
@@ -963,7 +1082,8 @@ function rep = build_rep()
     rep = struct("dataset_label", dataset_label(), "data", app_state.data, "dq", app_state.dq, ..
                  "cfg", cfg, "analysis", app_state.analysis, "naive", app_state.naive, ..
                  "signal", app_state.signal, "validated", has(app_state.cmp), ..
-                 "cmp", app_state.cmp, "bt", app_state.bt, "assump", current_assumptions());
+                 "cmp", app_state.cmp, "bt", app_state.bt, "assump", current_assumptions(), ..
+                 "explanation", app_state.info_ai);
 endfunction
 
 
@@ -1084,6 +1204,8 @@ function on_reset()
     set(gui.ed_buy, "string", "0.5"); set(gui.ed_sell, "string", "-0.5");
     set(gui.ed_capital, "string", "100000");
     set(gui.ed_cost, "string", "0.1"); set(gui.ed_slip, "string", "0.05");
+    set(gui.ai_mode_popup, "value", 1); app_state.ai_mode = "offline";
+    app_state.ai_explanation = [];
     if load_current_dataset() then
         invalidate("all", "Reset to defaults. No analysis yet.");
     else
@@ -1128,10 +1250,11 @@ function h = mk_edit(str, x, y, w, cb, tip)
 endfunction
 
 
-function h = mk_button(str, x, y, w, cb, tip)
+function h = mk_button(str, x, y, w, cb, tip, hh)
     global gui
+    if argn(2) < 7 then hh = 0.034; end
     h = uicontrol(gui.fig, "style", "pushbutton", "string", str, "units", "normalized", ..
-                  "position", [x y w 0.044], "fontsize", 12, "fontweight", "bold", ..
+                  "position", [x y w hh], "fontsize", 11, "fontweight", "bold", ..
                   "fontname", "Segoe UI", "callback", cb, "tooltipstring", tip);
 endfunction
 
@@ -1233,14 +1356,19 @@ gui.ed_cost = mk_edit("0.1", 0.135, 0.414, 0.063, "on_strategy_changed()", "Perc
 mk_text("Slippage (%)", LX, 0.386, 0.125, 0.022, %f, "left");
 gui.ed_slip = mk_edit("0.05", 0.135, 0.386, 0.063, "on_strategy_changed()", "Extra percent per executed trade");
 
-mk_head("ACTIONS", LX, 0.352, LW);
-gui.btn_run = mk_button("Run Analysis", LX, 0.304, LW, "on_run_analysis()", "Fit the selected model and evaluate it on the test window");
-gui.btn_compare = mk_button("Compare Models", LX, 0.256, LW, "on_compare()", "Naive vs LR vs AR vs ES on the same window, with ranking");
-gui.btn_backtest = mk_button("Run Backtest", LX, 0.208, LW, "on_run_backtest()", "Trade the model signals vs buy & hold (needs Run Analysis)");
-gui.btn_wf = mk_button("Walk Forward Validation", LX, 0.160, LW, "on_walk_forward()", "Expanding-window validation over several chronological folds");
-gui.btn_export = mk_button("Export Results", LX, 0.112, LW, "on_export()", "Save report (.txt) + CSV tables, a CSV, or chart PDF");
-gui.btn_info = mk_button("Model Info", LX, 0.058, 0.092, "on_model_info()", "Assumptions and limitations of the selected model");
-gui.btn_reset = mk_button("Reset", LX + 0.098, 0.058, 0.092, "on_reset()", "Restore default settings and clear results");
+mk_head("ACTIONS & AI INSIGHTS", LX, 0.352, LW);
+gui.btn_run = mk_button("Run Analysis", LX, 0.306, LW, "on_run_analysis()", "Fit the selected model and evaluate it on the test window", 0.034);
+gui.btn_compare = mk_button("Compare Models", LX, 0.268, LW, "on_compare()", "Naive vs LR vs AR vs ES vs Ridge on the same window, with ranking", 0.034);
+gui.btn_backtest = mk_button("Run Backtest", LX, 0.230, LW, "on_run_backtest()", "Trade the model signals vs buy & hold (needs Run Analysis)", 0.034);
+gui.btn_wf = mk_button("Walk Forward Validation", LX, 0.192, LW, "on_walk_forward()", "Expanding-window validation over several chronological folds", 0.034);
+gui.ai_mode_popup = uicontrol(gui.fig, "style", "popupmenu", ..
+    "string", "Offline (Deterministic)|AI Assistant (Cloud)", ..
+    "units", "normalized", "position", [LX 0.158 LW 0.026], "fontsize", 10, "fontname", "Segoe UI", "value", 1, ..
+    "callback", "on_ai_mode_changed()", "tooltipstring", "Select Offline deterministic briefing or Google Gemini AI Assistant");
+gui.btn_explain = mk_button("Explain Forecast (AI)", LX, 0.118, LW, "on_explain()", "Generate evidence-grounded briefing from computed forecasts", 0.034);
+gui.btn_export = mk_button("Export Results", LX, 0.078, LW, "on_export()", "Save report (.txt) + CSV tables, a CSV, or chart PDF", 0.034);
+gui.btn_info = mk_button("Model Info", LX, 0.040, 0.092, "on_model_info()", "Assumptions and limitations of the selected model", 0.032);
+gui.btn_reset = mk_button("Reset", LX + 0.098, 0.040, 0.092, "on_reset()", "Restore default settings and clear results", 0.032);
 
 // --- right area: dashboard panels ----------------------------------------------
 RX = 0.204;
@@ -1267,14 +1395,17 @@ gui.ax_main = make_axes(RX, 0.656, 0.496, 0.280 - HEAD_H - 0.024);
 [gui.lb_info, gui.head_info] = mk_list_panel("INFO", 0.704, 0.656, 0.288, 0.280);
 y_tab = 0.656 + 0.280 - HEAD_H + 0.002;
 gui.tab_dq = uicontrol(gui.fig, "style", "pushbutton", "string", "Data Quality", "units", "normalized", ..
-    "position", [0.716 y_tab 0.088 0.024], "fontsize", 11, "fontname", "Segoe UI", "callback", "show_info_tab(""dq"")", ..
+    "position", [0.708 y_tab 0.068 0.024], "fontsize", 10, "fontname", "Segoe UI", "callback", "show_info_tab(""dq"")", ..
     "tooltipstring", "Rows, date range, missing/duplicate/invalid rows, train/test rows, anomalies");
 gui.tab_asm = uicontrol(gui.fig, "style", "pushbutton", "string", "Assumptions", "units", "normalized", ..
-    "position", [0.808 y_tab 0.088 0.024], "fontsize", 11, "fontname", "Segoe UI", "callback", "show_info_tab(""asm"")", ..
+    "position", [0.778 y_tab 0.068 0.024], "fontsize", 10, "fontname", "Segoe UI", "callback", "show_info_tab(""asm"")", ..
     "tooltipstring", "Capital, costs, slippage, signal lag, position rule, periods");
 gui.tab_interp = uicontrol(gui.fig, "style", "pushbutton", "string", "Interpretation", "units", "normalized", ..
-    "position", [0.900 y_tab 0.090 0.024], "fontsize", 11, "fontname", "Segoe UI", "callback", "show_info_tab(""interp"")", ..
+    "position", [0.848 y_tab 0.070 0.024], "fontsize", 10, "fontname", "Segoe UI", "callback", "show_info_tab(""interp"")", ..
     "tooltipstring", "Dynamic quantitative research interpretation & statistical conclusions");
+gui.tab_ai = uicontrol(gui.fig, "style", "pushbutton", "string", "AI Insights", "units", "normalized", ..
+    "position", [0.920 y_tab 0.070 0.024], "fontsize", 10, "fontname", "Segoe UI", "callback", "show_info_tab(""ai"")", ..
+    "tooltipstring", "Evidence-grounded forecast explanation, model disagreement & uncertainty intelligence");
 
 // Row B: results + comparison/ranking + comparison chart
 [gui.lb_res, gui.head_res] = mk_list_panel("MODEL RESULTS", RX, 0.344, 0.204, 0.306);

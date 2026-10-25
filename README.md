@@ -185,12 +185,13 @@ Tests:
 
 # 15. Verification summary
 
+- **Phase 3 Explanation Assistant suite (`test_explanation_engine.sce`): 83 checks, 0 failures** verifying structured snapshots, multi-model disagreement metrics, Theil U interpretation, prompt grounding, mocked AI response parsing, network failure fallback to Mode A, and GUI integration.
 - **Phase 2 Ridge Forecasting & Validation suite (`test_forecasting_phase2.sce`): 93 checks, 0 failures** verifying 13 features, anti-leakage invariants, Tikhonov conditioning, leverage-adjusted intervals, 5-model comparison, 5-model walk-forward, multi-market data (AAPL & INFY), and GUI callbacks.
 - **Engine tests (`test_model_engine.sce`): 311 checks, 0 failures** across 21 test sections under Scilab 2026.1.0 on Windows.
 - **Market data adapter tests (`test_market_data_adapter.sce`): 70 checks, 0 failures** covering API parsing, cache provenance, error sanitization, and model integration.
 - **GUI workflow test (`test_gui_workflow.sce`): 56 checks, 0 failures**, driving live uicontrol callbacks, market data fetches, tab switching, and graphics contexts.
-- **Total automated coverage: 530 test assertions, 0 failures.**
-- Determinism: Repeated identical runs produce bit-for-bit identical predictions and equity curves (`norm == 0`).
+- **Total automated coverage: 613 test assertions, 0 failures.**
+- Determinism: Repeated identical runs produce bit-for-bit identical predictions, explanations, and equity curves (`norm == 0`).
 - Regenerating sample outputs reproduces identical numbers.
 
 # 16. Changes based on hackathon feedback & V3 engineering
@@ -218,25 +219,29 @@ Tests:
     - **Empirical Breakthrough on US Equities:** On AAPL (NASDAQ), Ridge achieves **0.5667 test RMSE** (a 53.6% error reduction vs Naive 1.2205 and 42.9% vs OLS LR 0.9923) with **69.2% directional timing accuracy**.
     - **Honest Random-Walk Reporting:** Plainly identifies when persistence models dominate in random-walk regimes (e.g. INFY, Blue Chip) rather than claiming artificial superiority.
     - **Verified Scilab 2026.1.0 Runtime:** 530 automated test assertions passing with zero failures.
+12. **Phase 3: AI Explanation Assistant & Forecast Intelligence:**
+    - **Dual Operating Modes:** Mode A (Deterministic Offline Mathematical Intelligence) requiring zero network or API keys, and Mode B (Evidence-Grounded AI Assistant via Google Gemini REST API).
+    - **7-Section Quantitative Briefing:** Executive forecast summary, multi-model disagreement & spread metrics, empirical validation & Theil's U interpretation, prediction interval uncertainty calibration, data quality & provenance, methodological caveats, and analytical follow-up suggestions.
+    - **Anti-Hallucination Guardrails:** Prompt strictly confines external LLM to computed snapshot facts; forbids price/news invention and ungrounded financial promises.
+    - **Privacy & Secret Redaction:** API keys and credential query params are masked in UI and logs (`ee_sanitize_error`); zero local file paths or user data transmitted.
+    - **Graceful Fallback:** Network failures, rate limits (HTTP 429), or missing keys seamlessly degrade to Mode A with diagnostic banners.
+    - **Single-Window GUI Integration:** Added `AI Insights` tab, `gui.ai_mode_popup` mode selector, `gui.btn_explain` action button, and stale-data protection.
+    - **Comprehensive Test Suite:** 83 new automated tests, elevating system coverage to **613 assertions passing with zero failures**.
 
 # 17. Files
 
 ```
 01_Source_Code/scilab_gui_app/  gui_app.sce  model_engine.sce  market_data_adapter.sce
+                                explanation_engine.sce
                                 test_model_engine.sce  test_market_data_adapter.sce
                                 test_gui_workflow.sce  test_forecasting_phase2.sce
+                                test_explanation_engine.sce
                                 generate_sample_outputs.sce  sample_data/  outputs/  tools/
-PHASE1_PRODUCTION_READINESS_AUDIT.md  PHASE2_FORECASTING_VALIDATION.md
-02_Documentation/  StockVision_README.pdf  StockVision_Project_Report.pdf
+                                fixtures/mock_gemini_response.json
+PHASE1_PRODUCTION_READINESS_AUDIT.md  PHASE2_FORECASTING_VALIDATION.md  PHASE3_AI_EXPLANATION_VALIDATION.md
+02_Documentation/  StockVision_README.pdf  StockVision_Project_Report.pdf  source/
 03_Demo_Video/  Scilab_demo_video.mp4  05_GUI_Screenshots/  06_Sample_Outputs/
-config/  market_data_config.json.example
-```
-                                test_gui_workflow.sce  generate_sample_outputs.sce
-                                MANUAL_TEST_CHECKLIST.md  sample_data/  outputs/  tools/
-02_Documentation/  StockVision_README.pdf  StockVision_Project_Report.pdf  source/ (Markdown + CSS + build script for the PDFs)
-03_Demo_Video/  Scilab_demo_video.mp4 (1:48 captioned screen recording, no voice-over)  DEMO_VIDEO_SCRIPT_V2.md
-04_Problem_Statement/  StockVision_Problem_Statement.pdf
-05_GUI_Screenshots/  01..09 PNG        06_Sample_Outputs/  CSV/TXT samples
+config/  market_data_config.json.example  ai_config.json.example
 ```
 
 `sample_data/messy_demo_data_quality.csv` is a new demo file (118 usable rows, newest-first, one missing value, one impossible bar) used to show the data-quality counters; the three original datasets are unchanged. `tools/` holds the scripts used to capture the screenshots and demo video.
