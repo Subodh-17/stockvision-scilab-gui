@@ -132,9 +132,9 @@ Position still open at the end (not a trade).
 
 | Check | Result |
 |--------------|--------------|
-| Engine tests (`test_model_engine.sce`) | 295 checks, 0 failures (Scilab 2026.1.0 on Windows) |
+| Engine tests (`test_model_engine.sce`) | 311 checks, 0 failures (Scilab 2026.1.0 on Windows) |
 | GUI workflow test (`test_gui_workflow.sce`) | 45 checks, 0 failures (live callbacks & graphics contexts) |
-| Total automated checks | 340 checks, 0 failures |
+| Total automated checks | 356 checks, 0 failures |
 | Determinism & reproducibility | Bit-for-bit identical predictions and equity curves (`norm == 0`) |
 | Sample-output regeneration | Identical numbers reproduced from engine runs |
 | Platform compatibility | Verified on Windows 11 with Scilab 2026.1.0 and Linux Scilab 2024.0.0 |
@@ -149,7 +149,7 @@ The GUI test confirms exactly one graphics window after analyses, comparison, ba
 | Lengthy source comments | Verbose comment blocks substantially reduced and replaced with short purpose and assumption notes | Source files |
 | Comparison with other submissions | Same-window four-way comparison, walk-forward, ranking, baseline verdicts, data-quality summary, richer export | Section 4; screenshots 06, 08 |
 | Simplified modelling/backtesting assumptions | Assumptions panel; naive baseline; buy-and-hold benchmark; costs on every trade; execution lag tests; Model Info limitations | Section 6; screenshot 07 |
-| **V3 Quantitative Differentiation** | Exact 95% OLS prediction intervals with leverage, data-quality anomaly detection, dynamic research interpretation tab, Calmar ratio, market exposure % | `model_engine.sce`, `gui_app.sce`, Test 20 |
+| **V3 Quantitative Differentiation** | Exact Student's $t$ 95% prediction intervals with leverage, Theil's U/U2 metrics, data-quality anomaly detection, dynamic research interpretation tab, Calmar ratio, market exposure % | `model_engine.sce`, `gui_app.sce`, Tests 20-21 |
 
 # 10. Limitations and future work
 

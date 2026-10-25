@@ -4,7 +4,7 @@ Run from this folder in Scilab: `exec("gui_app.sce", -1);`
 Recommended window: about 1500 x 980 px (the window shrinks to the screen; text panels then scroll).
 
 Automated coverage that does **not** replace this list:
-`test_model_engine.sce` (291 checks, 0 failures on Scilab 2026.1.0) and `test_gui_workflow.sce` (45 checks, 0 failures,
+`test_model_engine.sce` (311 checks, 0 failures on Scilab 2026.1.0) and `test_gui_workflow.sce` (45 checks, 0 failures,
 drives the real GUI callbacks and graphics contexts).
 
 ## A. Launch and single-window rule

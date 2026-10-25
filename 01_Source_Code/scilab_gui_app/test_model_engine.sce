@@ -2,6 +2,11 @@
 // Run: scilab-cli -nb -f test_model_engine.sce   (from this folder)
 
 clear; clc;
+try
+    _this_dir = get_absolute_file_path("test_model_engine.sce");
+    cd(_this_dir);
+catch
+end
 exec("model_engine.sce", -1);
 
 n_pass = 0; n_fail = 0;
@@ -1141,6 +1146,69 @@ bt_det1 = run_backtest(r_det1.y_true, r_det1.y_pred, 0.5, -0.5, 100000, 0.1, 0.0
 bt_det2 = run_backtest(r_det2.y_true, r_det2.y_pred, 0.5, -0.5, 100000, 0.1, 0.05);
 check(norm(bt_det1.strategy_value - bt_det2.strategy_value) == 0, "V3 determinism: backtest equity curves are bit-for-bit reproducible");
 check(bt_det1.total_costs_paid == bt_det2.total_costs_paid, "V3 determinism: cumulative costs paid is deterministic");
+
+// ---------------------------------------------------------------------------
+// Test 21: Student''s t-Quantiles, Theil''s Inequality Metrics & Labeling Integrity
+// ---------------------------------------------------------------------------
+// 21a. student_t_crit calculations across degrees of freedom
+t_10 = student_t_crit(10, 0.05);
+check(abs(t_10 - 2.2281) < 0.005, "student_t_crit: df=10 yields ~2.228");
+
+t_30 = student_t_crit(30, 0.05);
+check(abs(t_30 - 2.0423) < 0.005, "student_t_crit: df=30 yields ~2.042");
+
+t_100 = student_t_crit(100, 0.05);
+check(abs(t_100 - 1.9840) < 0.005, "student_t_crit: df=100 yields ~1.984");
+
+t_1000 = student_t_crit(1000, 0.05);
+check(abs(t_1000 - 1.962) < 0.01, "student_t_crit: df=1000 approaches normal 1.960");
+
+check(t_10 > t_30 & t_30 > t_100 & t_100 > t_1000, "student_t_crit: t-critical values strictly decrease monotonically with df");
+
+t_edge = student_t_crit(0, 0.05);
+check(t_edge > 2.0, "student_t_crit: df < 1 fallback returns safe conservative critical value");
+
+// 21b. Theil''s Inequality Coefficient (U1)
+y_act = [100; 102; 104; 103; 105];
+m_perf = compute_metrics(y_act, y_act, [99; 100; 102; 104; 103]);
+check(m_perf.theil_u == 0, "Theil U1: perfect predictions yield exact 0 inequality coefficient");
+
+y_approx = [101; 101; 105; 102; 106];
+m_approx = compute_metrics(y_act, y_approx, [99; 100; 102; 104; 103]);
+check(m_approx.theil_u > 0 & m_approx.theil_u < 1, "Theil U1: imperfect predictions yield bounded U in (0, 1)");
+
+// 21c. Theil''s U2 (relative to naive random walk persistence)
+y_naive_exact = [99; 100; 102; 104; 103];
+m_naive_sim = compute_metrics(y_act, y_naive_exact, y_naive_exact);
+check(abs(m_naive_sim.theil_u2 - 1.0) < 1e-6, "Theil U2: predictions identical to naive persistence yield exactly U2 = 1.0");
+
+check(m_approx.theil_u2 < 1.0, "Theil U2: superior forecast yields U2 < 1.0 relative to random walk");
+
+// 21d. Format model results accurately differentiates intervals and mentions Theil''s U
+lines_lr = format_model_results(r_lr3, r_lr3, generate_signal(100, r_lr3.next_price, 0.5, -0.5), %f);
+blob_lr = strcat(lines_lr, " ");
+check(strindex(blob_lr, "Forecast 95% PI:") <> [] & strindex(blob_lr, "(leverage-adjusted)") <> [], ..
+      "format_model_results: LR displays leverage-adjusted 95% prediction interval");
+check(strindex(blob_lr, "Theil''s U:") <> [], "format_model_results: reports Theil''s U metric");
+
+lines_es = format_model_results(r_es3, r_lr3, generate_signal(100, r_es3.next_price, 0.5, -0.5), %f);
+blob_es = strcat(lines_es, " ");
+check(strindex(blob_es, "Forecast band:") <> [] & strindex(blob_es, "(approx. +/-1.96 s_e)") <> [], ..
+      "format_model_results: ES correctly labeled as approximate forecast band");
+
+r_naive3 = run_model(real_data, "NAIVE", split_cal, AR_P, ES_A, ES_B);
+lines_nv = format_model_results(r_naive3, r_naive3, generate_signal(100, r_naive3.next_price, 0.5, -0.5), %f);
+blob_nv = strcat(lines_nv, " ");
+check(strindex(blob_nv, "Baseline band:") <> [] & strindex(blob_nv, "(random walk +/-1.96 s_e)") <> [], ..
+      "format_model_results: Naive baseline correctly labeled as random walk band");
+
+// 21e. CSV export includes Theil''s U and Theil''s U2
+test_csv_path = TMP + "theil_export_test.csv";
+export_results_csv(test_csv_path, rep2);
+csv_lines = mgetl(test_csv_path);
+csv_blob = strcat(csv_lines, " ");
+check(strindex(csv_blob, "Theil_U,") <> [], "export_results_csv: includes Theil_U column");
+check(strindex(csv_blob, "Theil_U2_vs_Naive,") <> [], "export_results_csv: includes Theil_U2_vs_Naive column");
 
 mprintf("\n========================================\n");
 mprintf("ALL MODEL ENGINE TESTS PASSED\n");

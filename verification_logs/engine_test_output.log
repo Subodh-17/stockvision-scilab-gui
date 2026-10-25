@@ -1,4 +1,4 @@
-PASS: load_dataset: sample_data/tech_growth_stock.csv loaded rows > 0
+﻿PASS: load_dataset: sample_data/tech_growth_stock.csv loaded rows > 0
 PASS: load_dataset: close vector length matches n
 PASS: load_dataset: no NaN in close prices
 PASS: load_dataset: clean bundled file produces no warnings
@@ -293,6 +293,22 @@ PASS: V3 determinism: run_model produces bit-for-bit identical predictions
 PASS: V3 determinism: next-day forecast is perfectly deterministic
 PASS: V3 determinism: backtest equity curves are bit-for-bit reproducible
 PASS: V3 determinism: cumulative costs paid is deterministic
+PASS: student_t_crit: df=10 yields ~2.228
+PASS: student_t_crit: df=30 yields ~2.042
+PASS: student_t_crit: df=100 yields ~1.984
+PASS: student_t_crit: df=1000 approaches normal 1.960
+PASS: student_t_crit: t-critical values strictly decrease monotonically with df
+PASS: student_t_crit: df < 1 fallback returns safe conservative critical value
+PASS: Theil U1: perfect predictions yield exact 0 inequality coefficient
+PASS: Theil U1: imperfect predictions yield bounded U in (0, 1)
+PASS: Theil U2: predictions identical to naive persistence yield exactly U2 = 1.0
+PASS: Theil U2: superior forecast yields U2 < 1.0 relative to random walk
+PASS: format_model_results: LR displays leverage-adjusted 95% prediction interval
+PASS: format_model_results: reports Theil's U metric
+PASS: format_model_results: ES correctly labeled as approximate forecast band
+PASS: format_model_results: Naive baseline correctly labeled as random walk band
+PASS: export_results_csv: includes Theil_U column
+PASS: export_results_csv: includes Theil_U2_vs_Naive column
 
 ========================================
 ALL MODEL ENGINE TESTS PASSED

@@ -1,7 +1,7 @@
 Metric,Value
 Application,StockVision V3
 Platform,scilab-2026.1.0
-Timestamp,2026-10-20 00:06:22
+Timestamp,2026-10-25 10:24:25
 Dataset,Tech Growth Stock (synthetic)
 Date_First,2024-01-01
 Date_Last,2025-02-21
@@ -18,15 +18,17 @@ RMSE,2.7308398
 MAE,2.0970751
 MAPE_pct,1.3248536
 R2,0.8916251
+Theil_U,0.0084746
+Theil_U2_vs_Naive,1.0580405
 Direction_Accuracy_pct,55
 Prediction_Accuracy_pct,98.675146
 Naive_RMSE,2.5810353
 Current_Price,171.36329
 Predicted_Next_Price,172.51491
-Prediction_Interval_95_Low,168.31984
-Prediction_Interval_95_High,176.70999
-Rough_Band_Low_NOT_a_true_prediction_interval,168.31984
-Rough_Band_High_NOT_a_true_prediction_interval,176.70999
+Prediction_Interval_95_Low,168.29639
+Prediction_Interval_95_High,176.73344
+Rough_Band_Low_NOT_a_true_prediction_interval,168.29639
+Rough_Band_High_NOT_a_true_prediction_interval,176.73344
 Predicted_Change_pct,0.6720378
 Signal,BUY
 Buy_Threshold_pct,0.5

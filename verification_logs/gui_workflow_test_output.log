@@ -1,4 +1,4 @@
-OK   : launch: dataset loaded, no analysis yet
+﻿OK   : launch: dataset loaded, no analysis yet
 OK   : launch: Run Backtest and Export disabled until an analysis exists
 OK   : launch: Run/Compare/Walk-forward enabled
 OK   : launch: results panel shows the No-analysis-yet state
@@ -43,7 +43,7 @@ OK   : after exports: still exactly one window
 OK   : Model Info callback runs
 OK   : Reset: defaults restored and results cleared
 OK   : Reset: Run Backtest / Export disabled again
-[Dataset error] CSV error: failed to load [TMPDIR/bad.csv] -- CSV error: column 6 is labeled [Vol], expected [Volume]. Columns must appear in the order Date,Open,High,Low,Close,Volume. -- if this message does not look like one of the load_dataset_impl validation errors, it is an unexpected internal error; please report the exact text above.
+[<TEMP_DIR>/bad.csv] -- CSV error: column 6 is labeled [Vol], expected [Volume]. Columns must appear in the order Date,Open,High,Low,Close,Volume. -- if this message does not look like one of the load_dataset_impl validation errors, it is an unexpected internal error; please report the exact text above.
 OK   : bad CSV: load fails cleanly with an error, no crash
 
 GUI VERIFICATION: 0 failure(s)

@@ -163,7 +163,8 @@ function [ok, p, msg] = read_params()
         v(k) = strtod(s);
     end
     if v(1) <= v(2) then msg = "Buy threshold must be greater than the sell threshold."; return; end
-    if v(3) <= 0 then msg = "Starting capital must be positive."; return; end
+    if v(1) > 100 | v(2) < -100 then msg = "Buy and sell thresholds must be within [-100, 100] percent."; return; end
+    if v(3) <= 0 | v(3) > 1e11 then msg = "Starting capital must be positive and realistic (<= 1e11)."; return; end
     if v(4) < 0 | v(4) > 10 | v(5) < 0 | v(5) > 10 then
         msg = "Transaction cost and slippage must be between 0 and 10 (percent)."; return
     end
@@ -436,15 +437,23 @@ function show_info_tab(name)
     // Top-right panel shows data quality, assumptions, or research interpretation.
     global gui app_state
     app_state.info_tab = name;
+    TAB_ACT = [1 1 1];
+    TAB_INACT = [0.86 0.88 0.91];
     if name == "asm" then
         set_list(gui.lb_info, app_state.info_asm);
-        set(gui.tab_asm, "fontweight", "bold"); set(gui.tab_dq, "fontweight", "normal"); set(gui.tab_interp, "fontweight", "normal");
+        set(gui.tab_asm, "fontweight", "bold", "backgroundcolor", TAB_ACT);
+        set(gui.tab_dq, "fontweight", "normal", "backgroundcolor", TAB_INACT);
+        set(gui.tab_interp, "fontweight", "normal", "backgroundcolor", TAB_INACT);
     elseif name == "interp" then
         set_list(gui.lb_info, app_state.info_interp);
-        set(gui.tab_interp, "fontweight", "bold"); set(gui.tab_dq, "fontweight", "normal"); set(gui.tab_asm, "fontweight", "normal");
+        set(gui.tab_interp, "fontweight", "bold", "backgroundcolor", TAB_ACT);
+        set(gui.tab_dq, "fontweight", "normal", "backgroundcolor", TAB_INACT);
+        set(gui.tab_asm, "fontweight", "normal", "backgroundcolor", TAB_INACT);
     else
         set_list(gui.lb_info, app_state.info_dq);
-        set(gui.tab_dq, "fontweight", "bold"); set(gui.tab_asm, "fontweight", "normal"); set(gui.tab_interp, "fontweight", "normal");
+        set(gui.tab_dq, "fontweight", "bold", "backgroundcolor", TAB_ACT);
+        set(gui.tab_asm, "fontweight", "normal", "backgroundcolor", TAB_INACT);
+        set(gui.tab_interp, "fontweight", "normal", "backgroundcolor", TAB_INACT);
     end
 endfunction
 

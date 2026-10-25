@@ -148,7 +148,7 @@ exec("gui_app.sce", -1);
 ```
 
 Tests:
-- **Headless engine tests (291 checks):**
+- **Headless engine tests (311 checks):**
   - Windows: `& "C:\Program Files\scilab-2026.1.0\bin\WScilex-cli.exe" -nb -f test_model_engine.sce`
   - Linux: `scilab-cli -nb -f test_model_engine.sce`
 - **GUI workflow test (45 checks):**
@@ -173,9 +173,9 @@ Tests:
 
 # 15. Verification summary
 
-- Engine tests (`test_model_engine.sce`): **291 checks, 0 failures** across 20 test sections under Scilab 2026.1.0 on Windows.
+- Engine tests (`test_model_engine.sce`): **311 checks, 0 failures** across 21 test sections under Scilab 2026.1.0 on Windows.
 - GUI workflow test (`test_gui_workflow.sce`): **45 checks, 0 failures**, driving live uicontrol callbacks, tab switching, and graphics contexts.
-- **Total automated coverage: 336 test assertions, 0 failures.**
+- **Total automated coverage: 356 test assertions, 0 failures.**
 - Determinism: Repeated identical runs produce bit-for-bit identical predictions and equity curves (`norm == 0`).
 - Regenerating sample outputs reproduces identical numbers.
 
@@ -191,11 +191,13 @@ Tests:
 8. **Explicit assumptions.** A visible Assumptions panel, a data-quality panel, and a rewritten Model Info that states assumptions and limitations per model.
 9. **Improved UX.** Section headings, consistent layout, status bar with progress and error messages, "No analysis yet" states, disabled buttons when prerequisites are missing, tooltips, and no routine popups.
 10. **StockVision V3 Elite Engineering & Statistical Differentiation:**
-    - **Exact 95% OLS Prediction Intervals:** Derived analytically using residual variance and observation leverage matrix $x_*(X^TX)^{-1}x_*^T$.
+    - **Exact 95% Prediction Intervals:** Derived analytically using residual variance, observation leverage matrix $x_*(X^TX)^{-1}x_*^T$, and exact Student's $t$ distribution quantiles via native `cdft`.
+    - **Theil's Inequality Metrics:** Computes bounded Theil's $U_1 \in [0, 1]$ and Theil's $U_2$ relative to naive random walk persistence ($RMSE / RMSE_{\text{naive}}$).
+    - **Methodologically Transparent Forecast Bands:** Differentiates leverage-adjusted prediction intervals (OLS/AR) from approximate residual-based bands (Holt ES) and random-walk benchmark intervals.
     - **Data Quality Anomaly Detection:** Non-fatal detection of daily return spikes (>50%), zero-volume bars, and date gaps (>14 days).
     - **Dynamic Quantitative Research Interpretation:** Automated, dynamic synthesis covering benchmark winners, naive comparison, directional timing, sample power, and caveats.
     - **Backtesting Realism Metrics:** Market exposure %, cumulative costs paid, Calmar ratio, and profit factor.
-    - **Verified Scilab 2026.1.0 Runtime:** 336 automated test checks passing with zero failures on Windows.
+    - **Verified Scilab 2026.1.0 Runtime:** 356 automated test checks passing with zero failures on Windows.
 
 # 17. Files
 

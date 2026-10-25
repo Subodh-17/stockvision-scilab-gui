@@ -1,7 +1,7 @@
 Metric,Value
 Application,StockVision V3
 Platform,scilab-2026.1.0
-Timestamp,2026-10-20 00:06:22
+Timestamp,2026-10-25 10:24:25
 Dataset,Tech Growth Stock (synthetic)
 Date_First,2024-01-01
 Date_Last,2025-02-21
@@ -18,6 +18,8 @@ RMSE,3.1122527
 MAE,2.4522682
 MAPE_pct,1.5412351
 R2,0.8592378
+Theil_U,0.0096712
+Theil_U2_vs_Naive,1.2058156
 Direction_Accuracy_pct,56.666667
 Prediction_Accuracy_pct,98.458765
 Naive_RMSE,2.5810353

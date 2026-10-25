@@ -443,6 +443,28 @@ function m = compute_metrics(y_true, y_pred, y_prev)
         m.accuracy_pct = max(0, 100 - m.mape);
     end
 
+    // Theil's Inequality Coefficient (U1): U = RMSE / (sqrt(mean(y_true^2)) + sqrt(mean(y_pred^2)))
+    rms_true = sqrt(mean(y_true.^2));
+    rms_pred = sqrt(mean(y_pred.^2));
+    theil_denom = rms_true + rms_pred;
+    if theil_denom > 1e-12 then
+        m.theil_u = m.rmse / theil_denom;
+    else
+        m.theil_u = 0;
+    end
+
+    // Theil's U2 (relative to naive persistence): RMSE / RMSE_naive
+    m.theil_u2 = %nan;
+    if size(y_prev, "*") == size(y_true, "*") & size(y_true, "*") > 0 then
+        y_prev_col = y_prev(:);
+        rmse_naive = sqrt(mean((y_true - y_prev_col).^2));
+        if rmse_naive > 1e-12 then
+            m.theil_u2 = m.rmse / rmse_naive;
+        elseif m.rmse < 1e-12 then
+            m.theil_u2 = 1.0;
+        end
+    end
+
     m.dir_acc = %nan;
     m.n_dir_scored = 0;
     if size(y_prev, "*") == size(y_true, "*") & size(y_true, "*") > 0 then
@@ -586,8 +608,31 @@ function ev = evaluate_model(model)
 endfunction
 
 
+function t_crit = student_t_crit(df, alpha)
+    // Computes exact two-sided critical value t_{1 - alpha/2, df} using Scilab's built-in cdft.
+    // Falls back defensively to conservative quantile table if df < 1 or if cdft fails.
+    if argn(2) < 2 then alpha = 0.05; end
+    df_safe = max(1, round(df));
+    t_crit = 1.96;
+    try
+        p = 1 - alpha / 2;
+        q = alpha / 2;
+        [t_val] = cdft("T", df_safe, p, q);
+        if ~isnan(t_val) & ~isinf(t_val) & t_val > 0 then
+            t_crit = t_val;
+        end
+    catch
+        if df_safe < 5 then t_crit = 2.57;
+        elseif df_safe < 15 then t_crit = 2.15;
+        elseif df_safe < 30 then t_crit = 2.05;
+        else t_crit = 1.96;
+        end
+    end
+endfunction
+
+
 function [next_price, ci_low, ci_high] = predict_next_lr(model)
-    // Tomorrow's close from today's own feature row, with a 95% OLS
+    // Tomorrow's close from today's own feature row, with an exact 95% OLS
     // prediction interval incorporating residual standard error and observation leverage.
     latest_scaled = (model.latest_raw - model.mu) ./ model.sigma;
     latest_aug = [1, latest_scaled];
@@ -598,10 +643,9 @@ function [next_price, ci_low, ci_high] = predict_next_lr(model)
         h = max(0, latest_aug * model.XtX_inv * latest_aug');
     end
     se_pred = model.train_residual_std * sqrt(1 + h);
-    t_crit = 1.96;
-    if isfield(model, "df") & model.df < 30 then
-        t_crit = 2.05;
-    end
+    df_val = 30;
+    if isfield(model, "df") then df_val = model.df; end
+    t_crit = student_t_crit(df_val, 0.05);
     margin = t_crit * se_pred;
     ci_low = next_price - margin;
     ci_high = next_price + margin;
@@ -715,8 +759,9 @@ function [next_price, ci_low, ci_high] = predict_next_ar(model)
         h = max(0, latest_aug * model.XtX_inv * latest_aug');
     end
     se_pred = model.train_residual_std * sqrt(1 + h);
-    t_crit = 1.96;
-    if isfield(model, "df") & model.df < 30 then t_crit = 2.05; end
+    df_val = 30;
+    if isfield(model, "df") then df_val = model.df; end
+    t_crit = student_t_crit(df_val, 0.05);
     margin = t_crit * se_pred;
     ci_low = next_price - margin;
     ci_high = next_price + margin;
@@ -1180,6 +1225,10 @@ function signal = generate_signal(current_price, predicted_price, buy_threshold,
     signal = struct();
     signal.action = action;
     signal.pct_change = pct_change;
+    signal.current_price = current_price;
+    signal.predicted_price = predicted_price;
+    signal.buy_thr = buy_threshold;
+    signal.sell_thr = sell_threshold;
 endfunction
 
 
@@ -1473,13 +1522,23 @@ function lines = format_model_results(r, naive_r, sig, validated)
     if validated then status = "VALIDATED (walk-forward run)"; else status = "READY"; end
     lines = [ ..
         "Model:            " + r.name; ..
-        "Prediction:       " + fmt_num(r.next_price, 2) + "  (next close)"; ..
-        "Forecast 95% Int: [" + fmt_num(r.ci_lo, 2) + " - " + fmt_num(r.ci_hi, 2) + "]"; ..
+        "Prediction:       " + fmt_num(r.next_price, 2) + "  (next close)"];
+    if r.model_type == "ES" then
+        lines = [lines; "Forecast band:   [" + fmt_num(r.ci_lo, 2) + " - " + fmt_num(r.ci_hi, 2) + "]  (approx. +/-1.96 s_e)"];
+    elseif r.model_type == "NAIVE" then
+        lines = [lines; "Baseline band:   [" + fmt_num(r.ci_lo, 2) + " - " + fmt_num(r.ci_hi, 2) + "]  (random walk +/-1.96 s_e)"];
+    else
+        lines = [lines; "Forecast 95% PI:  [" + fmt_num(r.ci_lo, 2) + " - " + fmt_num(r.ci_hi, 2) + "]  (leverage-adjusted)"];
+    end
+    theil_str = "n/a";
+    if isfield(m, "theil_u") then theil_str = fmt_num(m.theil_u, 4); end
+    lines = [lines; ..
         "Current close:    " + fmt_num(sig.current_price, 2) + "  (" + fmt_signed_pct(sig.pct_change, 2) + " predicted)"; ..
         "Signal:           " + sig.action + "  (BUY >= " + fmt_num(sig.buy_thr, 2) + "%, SELL <= " + fmt_num(sig.sell_thr, 2) + "%)"; ..
         "Actual/Test RMSE: " + fmt_num(m.rmse, 4); ..
         "MAE:              " + fmt_num(m.mae, 4); ..
         "MAPE:             " + fmt_pct(m.mape, 3); ..
+        "Theil''s U:         " + theil_str; ..
         "R^2:              " + fmt_num(m.r2, 4); ..
         "Direction acc.:   " + fmt_pct(m.dir_acc, 1)];
     if r.model_type == "NAIVE" then
@@ -1983,6 +2042,11 @@ function export_results_csv(path, rep)
     L = append_line(L, "MAE," + safe_str(m.mae));
     L = append_line(L, "MAPE_pct," + safe_str(m.mape));
     L = append_line(L, "R2," + safe_str(m.r2));
+    theil_u_val = "n/a"; theil_u2_val = "n/a";
+    if isfield(m, "theil_u") then theil_u_val = safe_str(m.theil_u); end
+    if isfield(m, "theil_u2") then theil_u2_val = safe_str(m.theil_u2); end
+    L = append_line(L, "Theil_U," + theil_u_val);
+    L = append_line(L, "Theil_U2_vs_Naive," + theil_u2_val);
     L = append_line(L, "Direction_Accuracy_pct," + safe_str(m.dir_acc));
     L = append_line(L, "Prediction_Accuracy_pct," + safe_str(m.accuracy_pct));
     L = append_line(L, "Naive_RMSE," + safe_str(rep.naive.metrics.rmse));
