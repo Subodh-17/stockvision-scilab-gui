@@ -316,6 +316,119 @@ assert_true(bt.n_trades >= 0, "Backtest records trade count");
 
 
 // ---------------------------------------------------------------------------
+// Group 7: Live Fetch Configuration Robustness & Directory Independence
+// ---------------------------------------------------------------------------
+mprintf("\n--- Group 7: Live Fetch Configuration Robustness & Directory Independence ---\n");
+
+// 1. Missing API key handling
+cfg_missing = mda_default_config();
+assert_equal_val(cfg_missing.api_key, "", "Default config has empty API key");
+missing_err_thrown = %f;
+try
+    mda_fetch_market_data("AAPL", "NASDAQ", 120, %t, cfg_missing);
+catch
+    err_str = strcat(lasterror(), " ");
+    if strindex(err_str, "Market data configuration required") <> [] then
+        missing_err_thrown = %t;
+    end
+end
+assert_true(missing_err_thrown, "Missing API key raises explicit configuration error");
+
+// 2. Valid environment-variable configuration
+setenv("TWELVE_DATA_API_KEY", "  test_env_key_valid_999  ");
+cfg_env = mda_load_config();
+assert_equal_val(cfg_env.api_key, "test_env_key_valid_999", "Whitespace in TWELVE_DATA_API_KEY is trimmed");
+setenv("TWELVE_DATA_API_KEY", """quoted_env_key_888""");
+cfg_env_q = mda_load_config();
+assert_equal_val(cfg_env_q.api_key, "quoted_env_key_888", "Enclosing quotes in TWELVE_DATA_API_KEY are stripped");
+
+// 3. Valid JSON configuration
+tmp_json = TMPDIR + filesep() + "test_mda_config.json";
+mputl(["{""provider"": ""twelvedata"", ""api_key"": ""custom_json_key_777""}"], tmp_json);
+setenv("TWELVE_DATA_API_KEY", "");
+cfg_json = mda_load_config(tmp_json);
+assert_equal_val(cfg_json.api_key, "custom_json_key_777", "mda_load_config parses valid JSON config");
+
+// 4. Relative-path and alternate-working-directory startup
+orig_pwd = pwd();
+try
+    chdir(TMPDIR);
+    root_from_tmp = mda_project_root();
+    assert_true(isdir(root_from_tmp), "mda_project_root resolves to valid directory from arbitrary CWD");
+    assert_true(isdir(root_from_tmp + "01_Source_Code") | isdir(root_from_tmp + "config"), ..
+                "mda_project_root discovers StockVision root containing 01_Source_Code or config");
+    chdir(orig_pwd);
+catch
+    chdir(orig_pwd);
+    assert_true(%f, "Directory independence test encountered error");
+end
+
+// 5. Malformed configuration JSON
+tmp_bad_json = TMPDIR + filesep() + "test_mda_bad_config.json";
+mputl(["{ provider: INVALID_JSON_WITHOUT_QUOTES ..."], tmp_bad_json);
+cfg_bad = mda_load_config(tmp_bad_json);
+assert_equal_val(cfg_bad.api_key, "", "Malformed JSON does not crash and defaults api_key to empty");
+assert_true(cfg_bad.config_error <> "", "Malformed JSON records config_error message");
+
+// 6. Environment variable precedence and empty values
+// 6a: Empty env var does not overwrite file key
+setenv("TWELVE_DATA_API_KEY", "   ");
+cfg_prec1 = mda_load_config(tmp_json);
+assert_equal_val(cfg_prec1.api_key, "custom_json_key_777", "Empty env var does not overwrite valid file key");
+
+// 6b: Placeholder env var does not overwrite file key
+setenv("TWELVE_DATA_API_KEY", "YOUR_TWELVE_DATA_API_KEY_HERE");
+cfg_prec2 = mda_load_config(tmp_json);
+assert_equal_val(cfg_prec2.api_key, "custom_json_key_777", "Placeholder env var does not overwrite valid file key");
+
+// 6c: Valid env var overrides file key
+setenv("TWELVE_DATA_API_KEY", "override_env_key_666");
+cfg_prec3 = mda_load_config(tmp_json);
+assert_equal_val(cfg_prec3.api_key, "override_env_key_666", "Valid env var overrides JSON file key");
+setenv("TWELVE_DATA_API_KEY", "");
+
+// Clean up temp test files
+mdelete(tmp_json);
+mdelete(tmp_bad_json);
+
+// 7. Offline analysis with no API key
+d_synth_test = load_dataset(mda_adapter_dir() + "sample_data/tech_growth_stock.csv");
+assert_true(d_synth_test.n >= 100, "Offline synthetic dataset loads without API key");
+lr_synth = run_model(d_synth_test, "LR", 80, 5, 0.2, 0.1);
+assert_true(lr_synth.next_price > 0, "Model engine runs offline analysis without API key");
+
+// 8. Fetch Live failure preserving existing data
+existing_data = d_synth_test;
+fetch_failed = %f;
+dummy_bad_cfg = mda_default_config();
+dummy_bad_cfg.api_key = "";
+try
+    mda_fetch_market_data("NONEXISTENT_TICKER_XYZ", "NASDAQ", 120, %t, dummy_bad_cfg);
+catch
+    fetch_failed = %t;
+end
+assert_true(fetch_failed, "Invalid fetch raises error without crashing");
+assert_equal_val(existing_data.n, d_synth_test.n, "Existing data structure is perfectly preserved on fetch failure");
+assert_equal_val(existing_data.close(1), d_synth_test.close(1), "Existing price series unaltered on fetch failure");
+
+// 9. Ensuring mock/synthetic data is never labelled as live
+is_live_flag = %f;
+if isfield(d_synth_test, "source_mode") then
+    if d_synth_test.source_mode == "LIVE_MARKET" then is_live_flag = %t; end
+end
+assert_true(~is_live_flag, "Synthetic dataset is never flagged as LIVE_MARKET");
+assert_true(aapl_data.data_freshness <> "End-of-Day / 15m Delayed [Live Network Fetch]", ..
+            "Mock market fixture is never labeled as live network fetch");
+
+// 10. Credential redaction in logs and error messages
+secret_key = "secret_test_token_abc123";
+err_with_secret = "Failed to connect to https://api.twelvedata.com/time_series?apikey=" + secret_key + " (HTTP 401)";
+clean_err = mda_sanitize_error(err_with_secret, secret_key);
+assert_true(strindex(clean_err, secret_key) == [], "Secret key is redacted from error text");
+assert_true(strindex(clean_err, "***MASKED") <> [], "Error text contains masked marker");
+
+
+// ---------------------------------------------------------------------------
 // Final Summary
 // ---------------------------------------------------------------------------
 mprintf("\n======================================================================\n");

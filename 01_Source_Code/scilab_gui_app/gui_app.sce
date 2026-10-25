@@ -16,13 +16,13 @@
 clear; clc;
 
 // Resolve the app folder so the script works from any working directory.
-APP_DIR = "";
+global APP_DIR;
 try
     APP_DIR = get_absolute_file_path("gui_app.sce");
 catch
     APP_DIR = pwd() + filesep();
 end
-global APP_DIR;
+if APP_DIR == "" then APP_DIR = pwd() + filesep(); end
 exec(APP_DIR + "model_engine.sce", -1);
 exec(APP_DIR + "market_data_adapter.sce", -1);
 exec(APP_DIR + "explanation_engine.sce", -1);
@@ -809,11 +809,34 @@ function on_fetch_market_data()
         exch = "BSE";
     end
 
+    // Verify configuration before network request
+    cfg = mda_load_config();
+    if cfg.api_key == "" | cfg.api_key == "YOUR_TWELVE_DATA_API_KEY_HERE" then
+        set_status("Twelve Data API key required for live fetch. Configure in config/market_data_config.json or set TWELVE_DATA_API_KEY.", "error");
+        app_state.info_dq = [
+            "=== MARKET DATA CONFIGURATION REQUIRED ===";
+            "";
+            "Live market fetching requires a free Twelve Data API key:";
+            "  1. Register for free at https://twelvedata.com (8 credits/min free tier).";
+            "  2. Option A (File): Save to config/market_data_config.json:";
+            "     { ""provider"": ""twelvedata"", ""api_key"": ""YOUR_KEY_HERE"" }";
+            "  3. Option B (Environment): Set environment variable:";
+            "     $env:TWELVE_DATA_API_KEY = ""YOUR_KEY_HERE""";
+            "";
+            "Active Dataset Preserved:";
+            "  Currently active: " + app_state.dataset_labels(app_state.dataset_idx);
+            "  You can continue offline analysis with bundled synthetic datasets.";
+            "  (Click Run Analysis or Compare Models without an API key)."
+        ];
+        show_info_tab("dq");
+        return;
+    end
+
     set_status("Fetching market data for [" + sym + "] (" + exch + ") from Twelve Data...");
     try
-        d = mda_fetch_market_data(sym, exch, 120, %f);
+        d = mda_fetch_market_data(sym, exch, 120, %f, cfg);
     catch
-        err_msg = mda_sanitize_error(lasterror());
+        err_msg = mda_sanitize_error(lasterror(), cfg.api_key);
         set_status("Fetch failed: " + err_msg, "error");
         show_dialog("Market Data Fetch Error", err_msg, "error");
         return;
@@ -822,6 +845,21 @@ function on_fetch_market_data()
     app_state.custom_path = "";
     app_state.data = d;
     app_state.dq = data_quality_summary(d, app_state.split_ratio);
+
+    // If user was on a synthetic or mock dataset, switch dropdown to the live market option
+    if idx < 4 | idx > 6 then
+        if exch == "NSE" then
+            set(gui.dataset_popup, "value", 5);
+            app_state.dataset_idx = 5;
+        elseif exch == "BSE" then
+            set(gui.dataset_popup, "value", 6);
+            app_state.dataset_idx = 6;
+        else
+            set(gui.dataset_popup, "value", 4);
+            app_state.dataset_idx = 4;
+        end
+    end
+
     invalidate("all", "Market data loaded: " + sym + " (" + exch + ", " + string(d.n) + " bars). Click Run Analysis.");
     show_info_tab("dq");
     set_status("Market data loaded: " + sym + " (" + exch + ", " + string(d.n) + " bars, " + d.data_freshness + ").", "ok");

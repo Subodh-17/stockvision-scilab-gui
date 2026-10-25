@@ -13,6 +13,25 @@
 //
 // Load with: exec("market_data_adapter.sce", -1);
 // ============================================================================
+global MDA_SCRIPT_DIR;
+try
+    MDA_SCRIPT_DIR = get_absolute_file_path("market_data_adapter.sce");
+catch
+    if ~exists("MDA_SCRIPT_DIR") then MDA_SCRIPT_DIR = ""; end
+end
+
+// Ensure parse_iso_date helper from model_engine.sce is available if loaded standalone
+if ~exists("parse_iso_date") then
+    try
+        if MDA_SCRIPT_DIR <> "" & isfile(MDA_SCRIPT_DIR + "model_engine.sce") then
+            exec(MDA_SCRIPT_DIR + "model_engine.sce", -1);
+        elseif isfile(pwd() + filesep() + "model_engine.sce") then
+            exec(pwd() + filesep() + "model_engine.sce", -1);
+        end
+    catch
+        // Handled dynamically if needed
+    end
+end
 
 
 // ---------------------------------------------------------------------------
@@ -21,10 +40,30 @@
 
 function p = mda_adapter_dir()
     // Returns the directory containing this script.
+    global MDA_SCRIPT_DIR APP_DIR;
+    if exists("MDA_SCRIPT_DIR") & MDA_SCRIPT_DIR <> "" & isdir(MDA_SCRIPT_DIR) then
+        p = MDA_SCRIPT_DIR;
+        return;
+    end
+    if exists("APP_DIR") & APP_DIR <> "" & isdir(APP_DIR) then
+        p = APP_DIR;
+        return;
+    end
     try
         p = get_absolute_file_path("market_data_adapter.sce");
+        MDA_SCRIPT_DIR = p;
+        return;
     catch
-        p = pwd() + filesep();
+        cand = pwd() + filesep();
+        if isfile(cand + "market_data_adapter.sce") then
+            p = cand;
+            return;
+        end
+        if isdir(cand + "01_Source_Code" + filesep() + "scilab_gui_app") then
+            p = cand + "01_Source_Code" + filesep() + "scilab_gui_app" + filesep();
+            return;
+        end
+        p = cand;
     end
 endfunction
 
@@ -32,13 +71,31 @@ endfunction
 function p = mda_project_root()
     // Locates the project root (contains config/ or 01_Source_Code/).
     adir = mda_adapter_dir();
-    // Check if adir is inside 01_Source_Code/scilab_gui_app
+    // 1. Check 2 levels up from adapter dir (e.g. 01_Source_Code/scilab_gui_app/ -> repo root)
     cand = adir + ".." + filesep() + ".." + filesep();
     if isdir(cand + "config") | isdir(cand + "01_Source_Code") then
         p = cand;
         return;
     end
+    // 2. Check 1 level up from adapter dir
+    cand = adir + ".." + filesep();
+    if isdir(cand + "config") | isdir(cand + "01_Source_Code") then
+        p = cand;
+        return;
+    end
+    // 3. Check adapter dir itself
+    if isdir(adir + "config") then
+        p = adir;
+        return;
+    end
+    // 4. Check pwd()
     cand = pwd() + filesep();
+    if isdir(cand + "config") | isdir(cand + "01_Source_Code") then
+        p = cand;
+        return;
+    end
+    // 5. Check 2 levels up from pwd()
+    cand = pwd() + filesep() + ".." + filesep() + ".." + filesep();
     if isdir(cand + "config") | isdir(cand + "01_Source_Code") then
         p = cand;
         return;
@@ -61,6 +118,8 @@ function cfg = mda_default_config()
     cfg.supported_exchanges = ["NASDAQ", "NYSE", "NSE", "BSE"];
     cfg.attribution = "Data provided by Twelve Data (twelvedata.com)";
     cfg.base_url = "https://api.twelvedata.com";
+    cfg.config_source = "defaults";
+    cfg.config_error = "";
 endfunction
 
 
@@ -75,11 +134,31 @@ function cfg = mda_load_config(custom_path)
     if config_path == "" then
         root = mda_project_root();
         cand1 = root + "config" + filesep() + "market_data_config.json";
-        cand2 = root + "config" + filesep() + "market_data_config.json.example";
-        if isfile(cand1) then
-            config_path = cand1;
-        elseif isfile(cand2) then
-            config_path = cand2;
+        cand2 = root + "market_data_config.json";
+        cand3 = mda_adapter_dir() + ".." + filesep() + ".." + filesep() + "config" + filesep() + "market_data_config.json";
+        cand4 = pwd() + filesep() + "config" + filesep() + "market_data_config.json";
+        cand5 = pwd() + filesep() + "market_data_config.json";
+
+        candidates = [cand1; cand2; cand3; cand4; cand5];
+        for i = 1:size(candidates, 1)
+            if isfile(candidates(i)) then
+                config_path = candidates(i);
+                break;
+            end
+        end
+
+        // Fallback to example configuration if active config does not exist
+        if config_path == "" then
+            ex1 = root + "config" + filesep() + "market_data_config.json.example";
+            ex2 = root + "market_data_config.json.example";
+            ex3 = mda_adapter_dir() + ".." + filesep() + ".." + filesep() + "config" + filesep() + "market_data_config.json.example";
+            ex_candidates = [ex1; ex2; ex3];
+            for i = 1:size(ex_candidates, 1)
+                if isfile(ex_candidates(i)) then
+                    config_path = ex_candidates(i);
+                    break;
+                end
+            end
         end
     end
 
@@ -90,9 +169,16 @@ function cfg = mda_load_config(custom_path)
             parsed = fromJSON(raw);
             if isfield(parsed, "provider") then cfg.provider = parsed.provider; end
             if isfield(parsed, "api_key") then
-                // Ignore placeholder text
-                if parsed.api_key <> "YOUR_TWELVE_DATA_API_KEY_HERE" then
-                    cfg.api_key = parsed.api_key;
+                raw_k = stripblanks(string(parsed.api_key));
+                // Strip optional enclosing quotes
+                if length(raw_k) >= 2 then
+                    if (part(raw_k, 1) == """" & part(raw_k, length(raw_k)) == """") | ..
+                       (part(raw_k, 1) == "''" & part(raw_k, length(raw_k)) == "''") then
+                        raw_k = stripblanks(part(raw_k, 2:length(raw_k)-1));
+                    end
+                end
+                if raw_k <> "" & raw_k <> "YOUR_TWELVE_DATA_API_KEY_HERE" then
+                    cfg.api_key = raw_k;
                 end
             end
             if isfield(parsed, "cache_enabled") then cfg.cache_enabled = parsed.cache_enabled; end
@@ -100,15 +186,23 @@ function cfg = mda_load_config(custom_path)
             if isfield(parsed, "default_outputsize") then cfg.default_outputsize = parsed.default_outputsize; end
             if isfield(parsed, "attribution") then cfg.attribution = parsed.attribution; end
             if isfield(parsed, "base_url") then cfg.base_url = parsed.base_url; end
+            cfg.config_source = config_path;
         catch
-            // Fall back to defaults on corrupt config
+            cfg.config_error = "Malformed JSON config at: " + config_path;
         end
     end
 
     // Environment variable overrides file config (for CI/CD or secure terminals)
-    env_key = getenv("TWELVE_DATA_API_KEY", "");
-    if env_key <> "" then
+    env_key = stripblanks(getenv("TWELVE_DATA_API_KEY", ""));
+    if length(env_key) >= 2 then
+        if (part(env_key, 1) == """" & part(env_key, length(env_key)) == """") | ..
+           (part(env_key, 1) == "''" & part(env_key, length(env_key)) == "''") then
+            env_key = stripblanks(part(env_key, 2:length(env_key)-1));
+        end
+    end
+    if env_key <> "" & env_key <> "YOUR_TWELVE_DATA_API_KEY_HERE" then
         cfg.api_key = env_key;
+        cfg.config_source = "environment: TWELVE_DATA_API_KEY";
     end
 endfunction
 

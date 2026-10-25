@@ -17,6 +17,13 @@
 // Load with: exec("explanation_engine.sce", -1);
 // ============================================================================
 
+global EE_SCRIPT_DIR;
+try
+    EE_SCRIPT_DIR = get_absolute_file_path("explanation_engine.sce");
+catch
+    if ~exists("EE_SCRIPT_DIR") then EE_SCRIPT_DIR = ""; end
+end
+
 
 // ---------------------------------------------------------------------------
 // 1. Path and Directory Helpers
@@ -24,10 +31,30 @@
 
 function p = ee_engine_dir()
     // Returns the directory containing this script.
+    global EE_SCRIPT_DIR APP_DIR;
+    if exists("EE_SCRIPT_DIR") & EE_SCRIPT_DIR <> "" & isdir(EE_SCRIPT_DIR) then
+        p = EE_SCRIPT_DIR;
+        return;
+    end
+    if exists("APP_DIR") & APP_DIR <> "" & isdir(APP_DIR) then
+        p = APP_DIR;
+        return;
+    end
     try
         p = get_absolute_file_path("explanation_engine.sce");
+        EE_SCRIPT_DIR = p;
+        return;
     catch
-        p = pwd() + filesep();
+        cand = pwd() + filesep();
+        if isfile(cand + "explanation_engine.sce") then
+            p = cand;
+            return;
+        end
+        if isdir(cand + "01_Source_Code" + filesep() + "scilab_gui_app") then
+            p = cand + "01_Source_Code" + filesep() + "scilab_gui_app" + filesep();
+            return;
+        end
+        p = cand;
     end
 endfunction
 
@@ -35,12 +62,31 @@ endfunction
 function p = ee_project_root()
     // Locates the project root (contains config/ or 01_Source_Code/).
     edir = ee_engine_dir();
+    // 1. Check 2 levels up from engine dir
     cand = edir + ".." + filesep() + ".." + filesep();
     if isdir(cand + "config") | isdir(cand + "01_Source_Code") then
         p = cand;
         return;
     end
+    // 2. Check 1 level up from engine dir
+    cand = edir + ".." + filesep();
+    if isdir(cand + "config") | isdir(cand + "01_Source_Code") then
+        p = cand;
+        return;
+    end
+    // 3. Engine dir itself
+    if isdir(edir + "config") then
+        p = edir;
+        return;
+    end
+    // 4. Check pwd()
     cand = pwd() + filesep();
+    if isdir(cand + "config") | isdir(cand + "01_Source_Code") then
+        p = cand;
+        return;
+    end
+    // 5. Check 2 levels up from pwd()
+    cand = pwd() + filesep() + ".." + filesep() + ".." + filesep();
     if isdir(cand + "config") | isdir(cand + "01_Source_Code") then
         p = cand;
         return;

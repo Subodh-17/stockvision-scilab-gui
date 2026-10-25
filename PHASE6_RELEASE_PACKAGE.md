@@ -132,12 +132,12 @@ StockVision includes **6 independent test suites** (666 unit-test assertions), a
 | Test Suite File | Subsystem Verified | Checks | Exit Code | Result |
 | :--- | :--- | :---: | :---: | :---: |
 | `test_model_engine.sce` | Regression, AR, ES, signals, backtesting, intervals, exports | 311 | `0` | **PASS** |
-| `test_market_data_adapter.sce` | API schemas, ISO normalization, cache TTL, credential masking | 70 | `0` | **PASS** |
-| `test_gui_workflow.sce` | Live uicontrol callbacks, single-figure invariance, tab switching | 55 | `0` | **PASS** |
+| `test_market_data_adapter.sce` | API schemas, ISO normalization, cache TTL, credential masking, directory robustness | 91 | `0` | **PASS** |
+| `test_gui_workflow.sce` | Live uicontrol callbacks, single-figure invariance, tab switching, live fetch non-disruptive error handling | 58 | `0` | **PASS** |
 | `test_forecasting_phase2.sce` | Ridge regression ($L_2$), 13 features, Tikhonov shrinkage | 93 | `0` | **PASS** |
 | `test_explanation_engine.sce` | Snapshot grounding, Mode A/B fallback, prompt safety | 83 | `0` | **PASS** |
 | `test_statistical_integrity_phase5.sce`| Independent hand calculation recomputations, anti-leakage invariants | 54 | `0` | **PASS** |
-| **SUBTOTAL: 6 UNIT TEST SUITES** | **Mathematical and Functional Core Engine** | **666** | `0` | **PASS (100%)** |
+| **SUBTOTAL: 6 UNIT TEST SUITES** | **Mathematical and Functional Core Engine** | **690** | `0` | **PASS (100%)** |
 | `run_reproducible_benchmark.sce` | Multi-asset benchmark execution, CSV export integrity | 95 / 91* | `0` | **PASS** |
 | `verify_e2e_release.sce` | End-to-end full system release gate verification | 54 / 52* | `0` | **PASS** |
 | `tools/test_benchmark_nocache.sce` | Offline clean-room no-cache regression verification | 91 | `0` | **PASS** |

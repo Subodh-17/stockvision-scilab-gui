@@ -130,6 +130,23 @@ set(gui.ed_symbol, "string", "");
 on_fetch_market_data();
 ck(strindex(get(gui.status, "string"), "symbol cannot be empty") <> [] | strindex(get(gui.status, "string"), "enter a ticker") <> [], "market data GUI: empty symbol fetch reports clear status-bar error");
 
+// Missing API key non-disruptive handling
+set(gui.ed_symbol, "string", "AAPL");
+orig_env_key = getenv("TWELVE_DATA_API_KEY", "");
+setenv("TWELVE_DATA_API_KEY", "");
+function dummy_cfg = mda_load_config(p)
+    dummy_cfg = mda_default_config();
+endfunction
+prev_data_n = app_state.data.n;
+on_fetch_market_data();
+ck(strindex(get(gui.status, "string"), "Twelve Data API key required") <> [], "market data GUI: missing API key reports clear status-bar error without modal crash");
+ck(app_state.data.n == prev_data_n, "market data GUI: missing key fetch preserves existing dataset intact");
+ck(strindex(app_state.info_dq(1), "MARKET DATA CONFIGURATION REQUIRED") <> [], "market data GUI: missing key displays setup instructions in Info panel");
+clear mda_load_config;
+global APP_DIR;
+exec(APP_DIR + "market_data_adapter.sce", -1);
+if orig_env_key <> "" then setenv("TWELVE_DATA_API_KEY", orig_env_key); end
+
 on_reset();
 ck(app_state.dataset_idx == 1 & has(app_state.data), "market data GUI: Reset restores synthetic baseline dataset");
 
