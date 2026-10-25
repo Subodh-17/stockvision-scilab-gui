@@ -748,7 +748,7 @@ function on_fetch_market_data()
     try
         d = mda_fetch_market_data(sym, exch, 120, %f);
     catch
-        err_msg = strcat(lasterror(), " ");
+        err_msg = mda_sanitize_error(lasterror());
         set_status("Fetch failed: " + err_msg, "error");
         show_dialog("Market Data Fetch Error", err_msg, "error");
         return;

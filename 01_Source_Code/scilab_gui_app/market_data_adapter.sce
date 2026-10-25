@@ -160,6 +160,12 @@ function [cached_struct, is_valid] = mda_read_cache(symbol, exchange, outputsize
         lines = mgetl(fpath);
         raw = strcat(lines, "");
         cached_struct = fromJSON(raw);
+        // If _cache_meta is missing, derive original retrieval time from file modification timestamp
+        if ~isfield(cached_struct, "_cache_meta") then
+            md = getdate(mtime);
+            dt_str = msprintf("%04d-%02d-%02d %02d:%02d:%02d", md(1), md(2), md(6), md(7), md(8), md(9));
+            cached_struct._cache_meta = struct("retrieved_at", dt_str, "retrieved_sec", mtime);
+        end
         is_valid = %t;
     catch
         is_valid = %f;
@@ -171,6 +177,12 @@ function ok = mda_write_cache(symbol, exchange, outputsize, payload_struct)
     ok = %f;
     try
         fpath = mda_cache_path(symbol, exchange, outputsize);
+        // Attach cache provenance metadata distinguishing retrieval time from future access
+        payload_struct._cache_meta = struct("retrieved_at", mda_current_iso_time(), ..
+                                            "retrieved_sec", getdate("s"), ..
+                                            "symbol", symbol, ..
+                                            "exchange", exchange, ..
+                                            "outputsize", outputsize);
         json_str = toJSON(payload_struct);
         mputl(json_str, fpath);
         ok = %t;
@@ -181,7 +193,7 @@ endfunction
 
 
 // ---------------------------------------------------------------------------
-// 4. Time and Timestamp Formatting
+// 4. Time and Error Sanitization Helpers
 // ---------------------------------------------------------------------------
 
 function s = mda_current_iso_time()
@@ -194,6 +206,34 @@ function s = mda_current_iso_time()
     minu = string(d(8)); if length(minu) < 2 then minu = "0" + minu; end
     sec = string(d(9)); if length(sec) < 2 then sec = "0" + sec; end
     s = y + "-" + m + "-" + day + " " + h + ":" + minu + ":" + sec;
+endfunction
+
+
+function clean_msg = mda_sanitize_error(err_raw, api_key)
+    // Sanitizes error messages by masking API keys and credentials
+    // before displaying in user dialogs or writing to reports/logs.
+    if typeof(err_raw) <> "string" then
+        clean_msg = string(err_raw);
+    else
+        clean_msg = strcat(err_raw, " ");
+    end
+    clean_msg = stripblanks(clean_msg);
+
+    // 1. Mask explicit apikey query param pattern if present
+    try
+        clean_msg = strsubst(clean_msg, "/apikey=[^& \t\r\n]+/", "apikey=***MASKED***", "r");
+        clean_msg = strsubst(clean_msg, "/api_key=[^& \t\r\n]+/", "api_key=***MASKED***", "r");
+    catch
+        // In case regex engine throws on unexpected pattern
+    end
+
+    // 2. If api_key is non-empty and non-trivial (length >= 4), strip any raw occurrence
+    if argn(2) >= 2 & typeof(api_key) == "string" then
+        key_trimmed = stripblanks(api_key);
+        if length(key_trimmed) >= 4 & key_trimmed <> "demo" then
+            clean_msg = strsubst(clean_msg, key_trimmed, "***MASKED_API_KEY***");
+        end
+    end
 endfunction
 
 
@@ -431,13 +471,20 @@ function data = mda_parse_timeseries_response(res, requested_symbol, requested_e
     data.exchange = meta_exchange;
     data.currency = meta_currency;
     data.timezone = meta_timezone;
-    data.retrieval_time = mda_current_iso_time();
     data.attribution = "Data provided by Twelve Data (twelvedata.com)";
     data.source_mode = "LIVE_MARKET";
 
     if is_cache_hit then
+        if isfield(res, "_cache_meta") & isfield(res._cache_meta, "retrieved_at") then
+            data.retrieval_time = res._cache_meta.retrieved_at;
+        else
+            data.retrieval_time = mda_current_iso_time();
+        end
+        data.cache_access_time = mda_current_iso_time();
         data.data_freshness = "End-of-Day / 15m Delayed [Local Cache Hit]";
     else
+        data.retrieval_time = mda_current_iso_time();
+        data.cache_access_time = "N/A (Live Network Fetch)";
         data.data_freshness = "End-of-Day / 15m Delayed [Live Network Fetch]";
     end
 endfunction
@@ -500,7 +547,7 @@ function data = mda_fetch_market_data(symbol, exchange, outputsize, force_refres
     try
         raw_res = http_get(url);
     catch
-        net_err = lasterror();
+        net_err = mda_sanitize_error(lasterror(), cfg.api_key);
         error("Market data network error: Unable to reach Twelve Data API (" + net_err + ")." + ..
               ascii(10) + "Please check your internet connection or use bundled offline synthetic datasets.");
     end
@@ -510,7 +557,8 @@ function data = mda_fetch_market_data(symbol, exchange, outputsize, force_refres
         try
             raw_res = fromJSON(raw_res);
         catch
-            error("Market data JSON error: Failed to parse provider response payload.");
+            parse_err = mda_sanitize_error(lasterror(), cfg.api_key);
+            error("Market data JSON error: Failed to parse provider response payload (" + parse_err + ").");
         end
     end
 
@@ -538,4 +586,5 @@ function data = mda_load_mock(json_path, symbol, exchange)
     data = mda_parse_timeseries_response(parsed, symbol, exchange, %f);
     data.data_freshness = "Offline Mock Fixture (Automated Test)";
     data.source_mode = "MOCK_MARKET";
+    data.cache_access_time = "N/A (Mock Fixture)";
 endfunction

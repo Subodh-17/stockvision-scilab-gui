@@ -407,6 +407,11 @@ function dq = data_quality_summary(data, split_ratio)
         dq.timezone = data.timezone;
         dq.data_freshness = data.data_freshness;
         dq.retrieval_time = data.retrieval_time;
+        if isfield(data, "cache_access_time") then
+            dq.cache_access_time = data.cache_access_time;
+        else
+            dq.cache_access_time = "N/A";
+        end
         dq.attribution = data.attribution;
         dq.source_mode = data.source_mode;
     else
@@ -417,6 +422,7 @@ function dq = data_quality_summary(data, split_ratio)
         dq.timezone = "UTC";
         dq.data_freshness = "Offline Synthetic Benchmark";
         dq.retrieval_time = "N/A (Prepackaged)";
+        dq.cache_access_time = "N/A";
         dq.attribution = "StockVision Synthetic Reference Benchmark";
         dq.source_mode = "SYNTHETIC";
     end
@@ -1538,6 +1544,9 @@ function lines = format_data_quality(dq, label)
         sym_str = dq.symbol + " (" + dq.exchange + ", " + dq.timezone + ", " + dq.currency + ")";
     end
     if isfield(dq, "retrieval_time") & dq.retrieval_time <> "" then time_str = dq.retrieval_time; end
+    if isfield(dq, "cache_access_time") & dq.cache_access_time <> "" & dq.cache_access_time <> "N/A" & dq.cache_access_time <> "N/A (Live Network Fetch)" & dq.cache_access_time <> "N/A (Mock Fixture)" then
+        time_str = time_str + " (Loaded from cache: " + dq.cache_access_time + ")";
+    end
 
     lines = [ ..
         "Data Provider:       " + prov_str; ..

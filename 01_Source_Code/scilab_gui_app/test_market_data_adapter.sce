@@ -201,11 +201,21 @@ catch
 end
 assert_true(caught_no_key, "Missing API key raises explicit configuration error");
 
+// Error sanitization (API key masking)
+raw_leak = "HTTP error on https://api.twelvedata.com/time_series?symbol=AAPL&apikey=secret_token_abc12345&interval=1day";
+clean_leak = mda_sanitize_error(raw_leak, "secret_token_abc12345");
+assert_true(isempty(strindex(clean_leak, "secret_token_abc12345")), "mda_sanitize_error strips explicit secret token");
+assert_true(~isempty(strindex(clean_leak, "apikey=***MASKED***")), "mda_sanitize_error masks apikey URL parameter");
+
+raw_leak2 = "Connection failed with key super_secret_passphrase in response";
+clean_leak2 = mda_sanitize_error(raw_leak2, "super_secret_passphrase");
+assert_true(~isempty(strindex(clean_leak2, "***MASKED_API_KEY***")), "mda_sanitize_error masks custom api_key parameter in text");
+
 
 // ---------------------------------------------------------------------------
-// Group 5: Local Caching & Cache TTL Verification
+// Group 5: Local Caching, Expiration & Provenance
 // ---------------------------------------------------------------------------
-mprintf("\n--- Group 5: Local Caching & Expiration ---\n");
+mprintf("\n--- Group 5: Local Caching, Expiration & Provenance ---\n");
 
 test_cache_sym = "MOCK_TEST_SYM";
 test_cache_exch = "NASDAQ";
@@ -220,9 +230,23 @@ assert_true(w_ok, "Writing payload to local cache succeeds");
 assert_true(is_valid, "Cache read indicates valid hit within TTL");
 assert_equal_val(cached_res.status, "ok", "Cached payload preserves status");
 
+// Cache provenance metadata: retrieval time vs cache access time
+parsed_cached = mda_parse_timeseries_response(cached_res, test_cache_sym, test_cache_exch, %t);
+assert_true(isfield(parsed_cached, "retrieval_time"), "Cached response has retrieval_time");
+assert_true(isfield(parsed_cached, "cache_access_time"), "Cached response has cache_access_time");
+assert_true(strindex(parsed_cached.data_freshness, "Local Cache Hit") > 0, "Cached response freshness indicates Local Cache Hit");
+
 // Read cache with 0 TTL (expired)
 [cached_expired, is_expired_valid] = mda_read_cache(test_cache_sym, test_cache_exch, 65, -0.01);
 assert_true(~is_expired_valid, "Cache read correctly rejects expired payload (TTL <= 0)");
+
+// Corrupted cache file handling
+corrupt_sym = "CORRUPT_TEST_SYM";
+corrupt_fpath = mda_cache_path(corrupt_sym, "NASDAQ", 65);
+mputl("{invalid_json_content: [[[[", corrupt_fpath);
+[corrupt_res, is_corrupt_valid] = mda_read_cache(corrupt_sym, "NASDAQ", 65, 4.0);
+assert_true(~is_corrupt_valid, "Corrupt cache JSON is safely rejected without crash");
+if isfile(corrupt_fpath) then mdelete(corrupt_fpath); end
 
 
 // ---------------------------------------------------------------------------
@@ -244,6 +268,13 @@ assert_equal_val(dq.provider, "Twelve Data", "Data quality summary preserves Twe
 assert_equal_val(dq.symbol, "AAPL", "Data quality summary preserves AAPL symbol");
 assert_equal_val(dq.exchange, "NASDAQ", "Data quality summary preserves NASDAQ exchange");
 assert_true(strindex(strcat(rep_lines, " "), "Twelve Data") > 0, "Report text includes Twelve Data attribution");
+
+// Cached data quality summary provenance
+dq_cached = data_quality_summary(parsed_cached, 0.8);
+assert_equal_val(dq_cached.provider, "Twelve Data", "Cached data preserves provider");
+assert_true(isfield(dq_cached, "cache_access_time"), "dq struct contains cache_access_time");
+rep_cached = format_data_quality(dq_cached, "Cached AAPL");
+assert_true(strindex(strcat(rep_cached, " "), "Loaded from cache:") > 0, "format_data_quality displays Loaded from cache timestamp");
 
 // Model Fitting: Linear Regression
 split_cal = dq.train_rows;
