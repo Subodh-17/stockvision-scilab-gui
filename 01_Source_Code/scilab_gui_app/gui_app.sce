@@ -53,10 +53,16 @@ app_state.show_ma = %t;
 app_state.info_tab = "dq";   // top-right panel: "dq", "asm" or "interp"
 app_state.info_dq = ""; app_state.info_asm = ""; app_state.info_interp = "";
 
-// Palette
-GUI_BG = [0.93 0.94 0.95];
-GUI_HEAD = [0.13 0.25 0.42];
-GUI_WHITE = [1 1 1];
+// Palette -- Executive Financial Analytics Light Theme
+GUI_BG = [0.94 0.95 0.97];              // Soft neutral dashboard canvas
+GUI_HEAD = [0.08 0.16 0.30];            // Corporate navy header (#14294d)
+GUI_SECTION_HEAD = [0.12 0.22 0.38];    // Card section header navy (#1f3861)
+GUI_WHITE = [1 1 1];                    // Pure white card background
+GUI_STRIP_BG = [0.90 0.93 0.98];        // KPI summary strip background (#e6edf9)
+GUI_STRIP_FG = [0.06 0.16 0.36];        // KPI strip navy text (#0f295c)
+GUI_STATUS_BG = [0.86 0.89 0.93];       // Status bar light slate (#dce3ed)
+GUI_TAB_ACT = [1 1 1];                  // Active tab pure white
+GUI_TAB_INACT = [0.86 0.89 0.93];       // Inactive tab soft slate
 
 
 // ---------------------------------------------------------------------------
@@ -68,16 +74,16 @@ endfunction
 
 
 function set_status(msg, level)
-    // level: "info" (grey), "ok" (green), "error" (red).
+    // level: "info" (charcoal slate), "ok" (forest green), "error" (crimson).
     global gui
     if argn(2) < 2 then level = "info"; end
     select level
-    case "ok" then col = [0.05 0.45 0.15];
-    case "error" then col = [0.75 0.1 0.1];
-    else col = [0.15 0.15 0.15];
+    case "ok" then col = [0.04 0.48 0.16];
+    case "error" then col = [0.80 0.10 0.10];
+    else col = [0.10 0.16 0.26];
     end
     set(gui.status, "foregroundcolor", col);
-    set(gui.status, "string", " " + msg);
+    set(gui.status, "string", "  " + msg);
     drawnow();
 endfunction
 
@@ -105,7 +111,8 @@ function out = to_html_lines(lines)
     // (tokens ending in '*') in green, and colours signal / baseline lines.
     out = repmat("", size(lines, 1), 1);
     for k = 1:size(lines, 1)
-        s = html_escape(lines(k));
+        raw = lines(k);
+        s = html_escape(raw);
         body = ""; i = 1; n = length(s);
         while i <= n
             c = part(s, i);
@@ -118,24 +125,35 @@ function out = to_html_lines(lines)
                 end
                 tok = part(s, i:j-1);
                 if length(tok) > 1 & part(tok, length(tok)) == "*" & or(part(tok, 1) == ["0","1","2","3","4","5","6","7","8","9","-","+","."]) then
-                    tok = "<span style=''color:#0a7d2e;font-weight:bold''>" + tok + "</span>";
+                    tok = "<span style=''color:#057a28;font-weight:bold''>" + tok + "</span>";
                 end
                 body = body + tok; i = j;
             end
         end
-        col = "";
-        raw = lines(k);
+        col = ""; is_bold = %f;
         if part(raw, 1:7) == "Signal:" then
-            if strindex(raw, "BUY") <> [] then col = "#0a7d2e";
-            elseif strindex(raw, "SELL") <> [] then col = "#b01818";
-            else col = "#8a6d00"; end
+            if strindex(raw, "BUY") <> [] then col = "#057a28"; is_bold = %t;
+            elseif strindex(raw, "SELL") <> [] then col = "#c52222"; is_bold = %t;
+            else col = "#b45309"; is_bold = %t; end
         elseif strindex(raw, "does NOT beat") <> [] | strindex(raw, "No StockVision model") <> [] then
-            col = "#b01818";
+            col = "#c52222"; is_bold = %t;
+        elseif strindex(raw, "beats naive") <> [] then
+            col = "#057a28"; is_bold = %t;
         elseif part(raw, 1:12) == "Model status" then
-            col = "#0a7d2e";
+            col = "#057a28"; is_bold = %t;
+        elseif strindex(raw, "ANOMALY") <> [] | strindex(raw, "WARNING") <> [] then
+            col = "#b45309"; is_bold = %t;
+        elseif length(raw) > 3 & (part(raw, 1:3) == "---" | part(raw, 1:3) == "===") then
+            col = "#94a3b8";
+        elseif strindex(raw, "===") <> [] then
+            col = "#1e3a8a"; is_bold = %t;
         end
         if col <> "" then
-            body = "<span style=''color:" + col + ";font-weight:bold''>" + body + "</span>";
+            if is_bold then
+                body = "<span style=''color:" + col + ";font-weight:bold''>" + body + "</span>";
+            else
+                body = "<span style=''color:" + col + "''>" + body + "</span>";
+            end
         end
         out(k) = "<html>" + body + "</html>";
     end
@@ -226,11 +244,11 @@ function ax = make_axes(x, y, w, h)
     global gui
     ax = newaxes(gui.fig);
     ax.axes_bounds = [x, 1 - (y + h), w, h];
-    ax.margins = [0.10, 0.03, 0.04, 0.17];
+    ax.margins = [0.11, 0.04, 0.04, 0.17];
     ax.background = color(255, 255, 255);
     ax.box = "on";
     ax.font_size = 2;
-    ax.grid = [color(225, 225, 225), color(225, 225, 225)];
+    ax.grid = [color(225, 230, 238), color(225, 230, 238)];
 endfunction
 
 
@@ -249,8 +267,10 @@ function restore_axes(ax, ph)
     set(ph(1), "visible", "off"); set(ph(2), "visible", "off");
     sca(ax); delete(ax.children);
     ax.visible = "on";
-    ax.margins = [0.10, 0.03, 0.04, 0.17]; ax.box = "on";
+    ax.margins = [0.11, 0.04, 0.04, 0.17]; ax.box = "on";
     ax.axes_visible = ["on", "on", "on"];
+    ax.font_size = 2;
+    ax.grid = [color(225, 230, 238), color(225, 230, 238)];
 endfunction
 
 
@@ -280,10 +300,12 @@ endfunction
 
 function s = main_key_html(show_ma)
     // Colour key matching the plotted lines (HTML label above the chart).
-    s = "<html>&nbsp;" + key_span("#8290a8", "&#9472; Training close") + "&nbsp;&nbsp; " + key_span("#000000", "&#9472; Actual (test)") + ..
-        "&nbsp;&nbsp; " + key_span("#d22828", "- - Predicted");
-    if show_ma then s = s + "&nbsp;&nbsp; " + key_span("#2850dc", "-.- 20-day MA"); end
-    s = s + "&nbsp;&nbsp; " + key_span("#e08a00", "&#9670; Next forecast (95% PI)") + "&nbsp;&nbsp; " + key_span("#555555", "&#124; train/test split") + "</html>";
+    s = "<html>&nbsp;" + key_span("#64748b", "&#9472; Training close") + "&nbsp;&nbsp; " + ..
+        key_span("#0f172a", "&#9472; Actual (test)") + "&nbsp;&nbsp; " + ..
+        key_span("#dc2626", "- - Predicted");
+    if show_ma then s = s + "&nbsp;&nbsp; " + key_span("#2563eb", "-.- 20-day MA"); end
+    s = s + "&nbsp;&nbsp; " + key_span("#d97706", "&#9670; Next forecast (95% PI)") + "&nbsp;&nbsp; " + ..
+        key_span("#475569", "&#124; Train/test split") + "</html>";
 endfunction
 
 
@@ -295,7 +317,7 @@ function draw_main_chart()
     if ~has(app_state.analysis) then
         clear_axes(ax, gui.ph_main, "No analysis yet - click Run Analysis");
         set(gui.key_main, "string", "");
-        set(gui.head_main, "string", " PRICE & PREDICTION");
+        set(gui.head_main, "string", "  PRICE & PREDICTION");
         return
     end
     r = app_state.analysis; d = app_state.data; n = d.n;
@@ -310,27 +332,27 @@ function draw_main_chart()
     ylo = min(vis_vals) - pad; yhi = max(vis_vals) + pad;
     labels = [];   // legend labels in creation order
 
-    plot(hist_x, hist_y); style_last([130 140 160], 2, 1);
+    plot(hist_x, hist_y); style_last([115 128 150], 2, 1);
     labels = [labels, "Train"];
-    plot([r.split_cal + 0.5, r.split_cal + 0.5], [ylo, yhi]); style_last([90 90 90], 1, 3);
+    plot([r.split_cal + 0.5, r.split_cal + 0.5], [ylo, yhi]); style_last([80 90 105], 1.5, 3);
     labels = [labels, "Split"];
-    plot(r.test_idx, r.y_true); style_last([0 0 0], 2, 1);
+    plot(r.test_idx, r.y_true); style_last([15 23 42], 2.5, 1);
     labels = [labels, "Actual"];
-    plot(r.test_idx, r.y_pred); style_last([210 40 40], 2, 2);
+    plot(r.test_idx, r.y_pred); style_last([220 38 38], 2.5, 2);
     labels = [labels, "Predicted"];
     if app_state.show_ma then
         ma = moving_average(r.y_true, 20, r.ma_history);
-        plot(r.test_idx, ma); style_last([40 80 220], 2, 4);
+        plot(r.test_idx, ma); style_last([37 99 235], 2, 4);
         labels = [labels, "20d MA"];
     end
     if isfield(r, "interval_low") & isfield(r, "interval_high") then
         plot([n + 1, n + 1], [r.interval_low, r.interval_high]);
-        style_last([220 140 0], 2, 1);
+        style_last([217 119 6], 2.5, 1);
         labels = [labels, "95% PI"];
     end
     plot(n + 1, r.next_price, "d");
-    e = gce(); e.children(1).mark_background = color(255, 170, 0);
-    e.children(1).mark_foreground = color(120, 60, 0); e.children(1).mark_size = 8;
+    e = gce(); e.children(1).mark_background = color(245, 158, 11);
+    e.children(1).mark_foreground = color(146, 64, 14); e.children(1).mark_size = 9;
     labels = [labels, "Next day"];
 
     ax.data_bounds = [vis_lo, ylo; n + 4, yhi];
@@ -339,9 +361,11 @@ function draw_main_chart()
     ax.margins = [0.08, 0.03, 0.04, 0.17];
     ax.title.text = r.name + ": actual vs predicted (test window + equal training context)";
     ax.title.font_size = 3;
+    ax.font_size = 2;
     ax.y_label.text = "Price"; ax.x_label.text = "Date (yy-mm-dd)";
+    ax.x_label.font_size = 2; ax.y_label.font_size = 2;
     set(gui.key_main, "string", main_key_html(app_state.show_ma));
-    set(gui.head_main, "string", " PRICE & PREDICTION -- " + r.name);
+    set(gui.head_main, "string", "  PRICE & PREDICTION -- " + r.name);
 endfunction
 
 
@@ -358,22 +382,24 @@ function draw_comparison_chart()
     vals = [M(:, 1), M(:, 6)];
     bar(1:4, vals, 0.7, "grouped");
     e = gce();
-    e.children(2).background = color(60, 120, 200);    // first series: test window
-    e.children(1).background = color(240, 150, 40);    // second series: walk-forward
+    e.children(2).background = color(43, 108, 176);    // first series: test window (steel blue)
+    e.children(1).background = color(221, 107, 32);    // second series: walk-forward (warm amber)
     ymax = max(vals) * 1.25;
     ax.data_bounds = [0.4, 0; 4.6, ymax];
     ax.tight_limits = "on";
+    ax.font_size = 2;
     ax.x_ticks = tlist(["ticks", "locations", "labels"], (1:4)', lab(:));
     for i = 1:4
         xstring(i - 0.33, vals(i, 1) + ymax * 0.015, msprintf("%.2f", vals(i, 1)));
-        t = gce(); t.font_size = 1;
+        t = gce(); t.font_size = 2;
         xstring(i + 0.03, vals(i, 2) + ymax * 0.015, msprintf("%.2f", vals(i, 2)));
-        t = gce(); t.font_size = 1;
+        t = gce(); t.font_size = 2;
     end
     ax.margins = [0.12, 0.06, 0.04, 0.17];
     ax.title.text = "RMSE by model (lower is better)"; ax.title.font_size = 3;
     lg = legend(["Test window", "Walk-forward mean"], "in_upper_left"); lg.font_size = 2;
     ax.y_label.text = "RMSE"; ax.x_label.text = "";
+    ax.y_label.font_size = 2;
 endfunction
 
 
@@ -389,28 +415,30 @@ function draw_equity_chart()
     n = size(bt.strategy_value, 1);
     restore_axes(ax, gui.ph_eq);
     x = (1:n)';
-    plot(x, bt.buyhold_value); style_last([120 130 145], 2, 1);
-    plot(x, bt.strategy_value); style_last([20 110 60], 2, 1);
+    plot(x, bt.buyhold_value); style_last([100 116 139], 2, 1);
+    plot(x, bt.strategy_value); style_last([16 149 74], 2.5, 1);
     labels = ["Buy & hold", "StockVision strategy"];   // creation order
     pos = bt.position; prev = [0; pos(1:$-1)];
     buys = find(pos == 1 & prev == 0); sells = find(pos == 0 & prev == 1);
     if ~isempty(buys) then
         plot(buys, bt.strategy_value(buys), "^");
-        e = gce(); e.children(1).mark_background = color(30, 170, 60); e.children(1).mark_foreground = color(0, 90, 20);
-        e.children(1).mark_size = 7; labels = [labels, "BUY executed"];
+        e = gce(); e.children(1).mark_background = color(34, 197, 94); e.children(1).mark_foreground = color(20, 83, 45);
+        e.children(1).mark_size = 8; labels = [labels, "BUY executed"];
     end
     if ~isempty(sells) then
         plot(sells, bt.strategy_value(sells), "v");
-        e = gce(); e.children(1).mark_background = color(220, 50, 50); e.children(1).mark_foreground = color(120, 0, 0);
-        e.children(1).mark_size = 7; labels = [labels, "SELL executed"];
+        e = gce(); e.children(1).mark_background = color(239, 68, 68); e.children(1).mark_foreground = color(127, 29, 29);
+        e.children(1).mark_size = 8; labels = [labels, "SELL executed"];
     end
     allv = [bt.strategy_value; bt.buyhold_value];
     pad = 0.08 * (max(allv) - min(allv) + 1e-9);
     ax.data_bounds = [1, min(allv) - pad; n, max(allv) + pad];
     ax.tight_limits = "on";
+    ax.font_size = 2;
     set_date_ticks(ax, d.dates(r.test_idx), 1, n);
     ax.title.text = "Portfolio value on the test window (same period for both)"; ax.title.font_size = 3;
     ax.y_label.text = "Value"; ax.x_label.text = "";
+    ax.y_label.font_size = 2;
     lg = legend(labels, "in_lower_right"); lg.font_size = 2;
     ax.margins = [0.17, 0.06, 0.04, 0.17];
 endfunction
@@ -435,25 +463,27 @@ endfunction
 
 function show_info_tab(name)
     // Top-right panel shows data quality, assumptions, or research interpretation.
-    global gui app_state
+    global gui app_state GUI_TAB_ACT GUI_TAB_INACT
     app_state.info_tab = name;
-    TAB_ACT = [1 1 1];
-    TAB_INACT = [0.86 0.88 0.91];
+    TAB_ACT_BG = [1 1 1];
+    TAB_ACT_FG = [0.08 0.16 0.30];
+    TAB_INACT_BG = [0.86 0.89 0.93];
+    TAB_INACT_FG = [0.35 0.40 0.48];
     if name == "asm" then
         set_list(gui.lb_info, app_state.info_asm);
-        set(gui.tab_asm, "fontweight", "bold", "backgroundcolor", TAB_ACT);
-        set(gui.tab_dq, "fontweight", "normal", "backgroundcolor", TAB_INACT);
-        set(gui.tab_interp, "fontweight", "normal", "backgroundcolor", TAB_INACT);
+        set(gui.tab_asm, "fontweight", "bold", "backgroundcolor", TAB_ACT_BG, "foregroundcolor", TAB_ACT_FG);
+        set(gui.tab_dq, "fontweight", "normal", "backgroundcolor", TAB_INACT_BG, "foregroundcolor", TAB_INACT_FG);
+        set(gui.tab_interp, "fontweight", "normal", "backgroundcolor", TAB_INACT_BG, "foregroundcolor", TAB_INACT_FG);
     elseif name == "interp" then
         set_list(gui.lb_info, app_state.info_interp);
-        set(gui.tab_interp, "fontweight", "bold", "backgroundcolor", TAB_ACT);
-        set(gui.tab_dq, "fontweight", "normal", "backgroundcolor", TAB_INACT);
-        set(gui.tab_asm, "fontweight", "normal", "backgroundcolor", TAB_INACT);
+        set(gui.tab_interp, "fontweight", "bold", "backgroundcolor", TAB_ACT_BG, "foregroundcolor", TAB_ACT_FG);
+        set(gui.tab_dq, "fontweight", "normal", "backgroundcolor", TAB_INACT_BG, "foregroundcolor", TAB_INACT_FG);
+        set(gui.tab_asm, "fontweight", "normal", "backgroundcolor", TAB_INACT_BG, "foregroundcolor", TAB_INACT_FG);
     else
         set_list(gui.lb_info, app_state.info_dq);
-        set(gui.tab_dq, "fontweight", "bold", "backgroundcolor", TAB_ACT);
-        set(gui.tab_asm, "fontweight", "normal", "backgroundcolor", TAB_INACT);
-        set(gui.tab_interp, "fontweight", "normal", "backgroundcolor", TAB_INACT);
+        set(gui.tab_dq, "fontweight", "bold", "backgroundcolor", TAB_ACT_BG, "foregroundcolor", TAB_ACT_FG);
+        set(gui.tab_asm, "fontweight", "normal", "backgroundcolor", TAB_INACT_BG, "foregroundcolor", TAB_INACT_FG);
+        set(gui.tab_interp, "fontweight", "normal", "backgroundcolor", TAB_INACT_BG, "foregroundcolor", TAB_INACT_FG);
     end
 endfunction
 
@@ -938,12 +968,13 @@ endfunction
 // Layout: all positions are normalized (origin bottom-left) so the dashboard
 // scales with the window.
 // ---------------------------------------------------------------------------
-HEAD_H = 0.024;
+HEAD_H = 0.028;
 
 function h = mk_text(str, x, y, w, hh, bold, align)
     global gui GUI_BG
     h = uicontrol(gui.fig, "style", "text", "string", str, "units", "normalized", ..
-                  "position", [x y w hh], "backgroundcolor", GUI_BG, "fontsize", 11, ..
+                  "position", [x y w hh], "backgroundcolor", GUI_BG, "fontsize", 12, ..
+                  "fontname", "Segoe UI", "foregroundcolor", [0.12 0.18 0.26], ..
                   "horizontalalignment", align);
     if bold then set(h, "fontweight", "bold"); end
 endfunction
@@ -951,18 +982,19 @@ endfunction
 
 function h = mk_head(str, x, y, w)
     // Dark section heading bar whose top edge is at y + HEAD_H.
-    global gui GUI_HEAD
-    h = uicontrol(gui.fig, "style", "text", "string", " " + str, "units", "normalized", ..
-                  "position", [x y w 0.024], "backgroundcolor", GUI_HEAD, ..
-                  "foregroundcolor", [1 1 1], "fontweight", "bold", "fontsize", 11, ..
-                  "horizontalalignment", "left");
+    global gui GUI_HEAD HEAD_H
+    h = uicontrol(gui.fig, "style", "text", "string", "  " + str, "units", "normalized", ..
+                  "position", [x y w HEAD_H], "backgroundcolor", GUI_HEAD, ..
+                  "foregroundcolor", [1 1 1], "fontweight", "bold", "fontsize", 14, ..
+                  "fontname", "Segoe UI", "horizontalalignment", "left");
 endfunction
 
 
 function h = mk_edit(str, x, y, w, cb, tip)
     global gui
     h = uicontrol(gui.fig, "style", "edit", "string", str, "units", "normalized", ..
-                  "position", [x y w 0.026], "backgroundcolor", [1 1 1], "fontsize", 11, ..
+                  "position", [x y w 0.026], "backgroundcolor", [1 1 1], "fontsize", 12, ..
+                  "fontname", "Segoe UI", "foregroundcolor", [0.08 0.12 0.20], ..
                   "callback", cb, "tooltipstring", tip);
 endfunction
 
@@ -970,24 +1002,25 @@ endfunction
 function h = mk_button(str, x, y, w, cb, tip)
     global gui
     h = uicontrol(gui.fig, "style", "pushbutton", "string", str, "units", "normalized", ..
-                  "position", [x y w 0.040], "fontsize", 11, "fontweight", "bold", ..
-                  "callback", cb, "tooltipstring", tip);
+                  "position", [x y w 0.044], "fontsize", 12, "fontweight", "bold", ..
+                  "fontname", "Segoe UI", "callback", cb, "tooltipstring", tip);
 endfunction
 
 
 function [lb, hd] = mk_list_panel(title, x, y, w, hh)
     // Heading + monospaced listbox filling the rest of the panel.
-    global gui
-    hd = mk_head(title, x, y + hh - 0.024, w);
+    global gui HEAD_H
+    hd = mk_head(title, x, y + hh - HEAD_H, w);
     lb = uicontrol(gui.fig, "style", "listbox", "units", "normalized", ..
-                   "position", [x y w hh - 0.024], "backgroundcolor", [1 1 1], ..
-                   "fontname", "Monospaced", "fontsize", 9);
+                   "position", [x y w hh - HEAD_H], "backgroundcolor", [1 1 1], ..
+                   "fontname", "Monospaced", "fontsize", 11);
 endfunction
 
 
 function [ax, hd] = mk_axes_panel(title, x, y, w, hh)
-    hd = mk_head(title, x, y + hh - 0.024, w);
-    ax = make_axes(x, y, w, hh - 0.024);
+    global HEAD_H
+    hd = mk_head(title, x, y + hh - HEAD_H, w);
+    ax = make_axes(x, y, w, hh - HEAD_H);
 endfunction
 
 
@@ -996,7 +1029,7 @@ scr = get(0, "screensize_px");
 fig_w = min(1500, scr(3) - 20); fig_h = min(980, scr(4) - 60);
 gui.fig = figure("figure_name", "StockVision V3 -- Quantitative Research & Forecasting Terminal (Scilab)", ..
                  "position", [5, 5, fig_w, fig_h], "dockable", "off");
-gui.fig.background = color(236, 238, 241);
+gui.fig.background = color(240, 242, 247);
 toolbar(gui.fig.figure_id, "off");
 for nm = ["File", "Tools", "Edit", "?"]
     delmenu(gui.fig.figure_id, nm);
@@ -1016,64 +1049,65 @@ uimenu(m_help, "label", "About", "callback", "on_about()");
 
 // --- title band ---------------------------------------------------------------
 gui.title = uicontrol(gui.fig, "style", "text", "string", "  STOCKVISION V3", "units", "normalized", ..
-    "position", [0 0.946 0.22 0.054], "backgroundcolor", GUI_HEAD, "foregroundcolor", [1 1 1], ..
-    "fontsize", 22, "fontweight", "bold", "horizontalalignment", "left");
+    "position", [0 0.942 0.22 0.058], "backgroundcolor", GUI_HEAD, "foregroundcolor", [1 1 1], ..
+    "fontsize", 24, "fontweight", "bold", "fontname", "Segoe UI", "horizontalalignment", "left");
 gui.subtitle = uicontrol(gui.fig, "style", "text", "units", "normalized", ..
-    "string", "Quantitative Research & Forecasting Terminal  |  Linear Regression, AR and Exponential Smoothing vs naive baseline  |  built with Scilab", ..
-    "position", [0.22 0.946 0.78 0.054], "backgroundcolor", GUI_HEAD, "foregroundcolor", [0.85 0.9 1], ..
-    "fontsize", 12, "horizontalalignment", "left");
+    "string", "Quantitative Research & Forecasting Terminal  |  Linear Regression, AR & Holt Exp. Smoothing vs Naive Baseline  |  Scilab 2026", ..
+    "position", [0.22 0.942 0.78 0.058], "backgroundcolor", GUI_HEAD, "foregroundcolor", [0.82 0.88 0.98], ..
+    "fontsize", 13, "fontname", "Segoe UI", "horizontalalignment", "left");
 
 // --- left column: controls ------------------------------------------------------
-LX = 0.006; LW = 0.190;
-mk_head("DATASET & MODEL", LX, 0.915, LW);
-mk_text("Dataset", LX, 0.888, LW, 0.022, %f, "left");
+LX = 0.008; LW = 0.190;
+mk_head("DATASET & MODEL", LX, 0.908, LW);
+mk_text("Dataset", LX, 0.880, LW, 0.022, %f, "left");
 gui.dataset_popup = uicontrol(gui.fig, "style", "popupmenu", "string", strcat(app_state.dataset_labels, "|"), ..
-    "units", "normalized", "position", [LX 0.858 LW 0.028], "fontsize", 11, "value", 1, ..
+    "units", "normalized", "position", [LX 0.848 LW 0.030], "fontsize", 12, "fontname", "Segoe UI", "value", 1, ..
     "callback", "on_dataset_changed()", "tooltipstring", "Bundled synthetic datasets, or File > Load Custom CSV");
-mk_text("Model", LX, 0.830, LW, 0.022, %f, "left");
+mk_text("Model", LX, 0.820, LW, 0.022, %f, "left");
 gui.model_popup = uicontrol(gui.fig, "style", "popupmenu", ..
     "string", "Linear Regression|AR Time-Series|Exponential Smoothing", ..
-    "units", "normalized", "position", [LX 0.800 LW 0.028], "fontsize", 11, "value", 1, ..
+    "units", "normalized", "position", [LX 0.788 LW 0.030], "fontsize", 12, "fontname", "Segoe UI", "value", 1, ..
     "callback", "on_model_changed()", "tooltipstring", "Model analysed by Run Analysis and Run Backtest");
 
-mk_head("PARAMETERS", LX, 0.765, LW);
-mk_text("Train / test split", LX, 0.738, LW, 0.022, %f, "left");
+mk_head("PARAMETERS", LX, 0.752, LW);
+mk_text("Train / test split", LX, 0.726, LW, 0.022, %f, "left");
 gui.split_slider = uicontrol(gui.fig, "style", "slider", "min", 0.5, "max", 0.95, "value", 0.8, ..
-    "units", "normalized", "position", [LX 0.714 LW 0.022], "callback", "on_split_moved_wrapper()", ..
+    "units", "normalized", "position", [LX 0.702 LW 0.022], "callback", "on_split_moved_wrapper()", ..
     "tooltipstring", "Share of rows used for training. The rest is the test window.");
-gui.split_label = mk_text("Train/test split: 80% / 20%", LX, 0.690, LW, 0.022, %f, "left");
+gui.split_label = mk_text("Train/test split: 80% / 20%", LX, 0.678, LW, 0.022, %t, "left");
 gui.cb_ma = uicontrol(gui.fig, "style", "checkbox", "string", "Show 20-day moving average", "value", 1, ..
-    "units", "normalized", "position", [LX 0.660 LW 0.026], "fontsize", 11, "backgroundcolor", GUI_BG, ..
-    "callback", "on_ma_toggled()");
-mk_text("AR lookback (days)", LX, 0.630, 0.125, 0.024, %f, "left");
-gui.ed_lookback = mk_edit("10", 0.133, 0.630, 0.063, "on_model_params_changed()", "Past closes used by the AR model (2-60)");
-mk_text("Walk-forward folds", LX, 0.598, 0.125, 0.024, %f, "left");
-gui.ed_folds = mk_edit("5", 0.133, 0.598, 0.063, "on_model_params_changed()", "Requested folds (1-10); reduced automatically if data is short");
-mk_text("Exp. smoothing: alpha 0.30, beta 0.10 (fixed)", LX, 0.568, LW, 0.022, %f, "left");
+    "units", "normalized", "position", [LX 0.648 LW 0.026], "fontsize", 12, "fontname", "Segoe UI", ..
+    "backgroundcolor", GUI_BG, "callback", "on_ma_toggled()");
+mk_text("AR lookback (days)", LX, 0.618, 0.125, 0.024, %f, "left");
+gui.ed_lookback = mk_edit("10", 0.135, 0.618, 0.063, "on_model_params_changed()", "Past closes used by the AR model (2-60)");
+mk_text("Walk-forward folds", LX, 0.588, 0.125, 0.024, %f, "left");
+gui.ed_folds = mk_edit("5", 0.135, 0.588, 0.063, "on_model_params_changed()", "Requested folds (1-10); reduced automatically if data is short");
+mk_text("Exp. smoothing: alpha 0.30, beta 0.10 (fixed)", LX, 0.560, LW, 0.022, %f, "left");
 
-mk_head("STRATEGY & COSTS", LX, 0.535, LW);
-mk_text("BUY if forecast >= (%)", LX, 0.508, 0.125, 0.024, %f, "left");
-gui.ed_buy = mk_edit("0.5", 0.133, 0.508, 0.063, "on_strategy_changed()", "BUY when predicted change is at least this percent");
-mk_text("SELL if forecast <= (%)", LX, 0.478, 0.125, 0.024, %f, "left");
-gui.ed_sell = mk_edit("-0.5", 0.133, 0.478, 0.063, "on_strategy_changed()", "SELL (exit) when predicted change is at most this percent");
-mk_text("Starting capital", LX, 0.448, 0.125, 0.024, %f, "left");
-gui.ed_capital = mk_edit("100000", 0.133, 0.448, 0.063, "on_strategy_changed()", "Initial portfolio value for the backtest");
-mk_text("Transaction cost (%)", LX, 0.418, 0.125, 0.024, %f, "left");
-gui.ed_cost = mk_edit("0.1", 0.133, 0.418, 0.063, "on_strategy_changed()", "Percent of portfolio value per executed trade");
-mk_text("Slippage (%)", LX, 0.388, 0.125, 0.024, %f, "left");
-gui.ed_slip = mk_edit("0.05", 0.133, 0.388, 0.063, "on_strategy_changed()", "Extra percent per executed trade");
+mk_head("STRATEGY & COSTS", LX, 0.528, LW);
+mk_text("BUY if forecast >= (%)", LX, 0.498, 0.125, 0.024, %f, "left");
+gui.ed_buy = mk_edit("0.5", 0.135, 0.498, 0.063, "on_strategy_changed()", "BUY when predicted change is at least this percent");
+mk_text("SELL if forecast <= (%)", LX, 0.468, 0.125, 0.024, %f, "left");
+gui.ed_sell = mk_edit("-0.5", 0.135, 0.468, 0.063, "on_strategy_changed()", "SELL (exit) when predicted change is at most this percent");
+mk_text("Starting capital", LX, 0.438, 0.125, 0.024, %f, "left");
+gui.ed_capital = mk_edit("100000", 0.135, 0.438, 0.063, "on_strategy_changed()", "Initial portfolio value for the backtest");
+mk_text("Transaction cost (%)", LX, 0.408, 0.125, 0.024, %f, "left");
+gui.ed_cost = mk_edit("0.1", 0.135, 0.408, 0.063, "on_strategy_changed()", "Percent of portfolio value per executed trade");
+mk_text("Slippage (%)", LX, 0.378, 0.125, 0.024, %f, "left");
+gui.ed_slip = mk_edit("0.05", 0.135, 0.378, 0.063, "on_strategy_changed()", "Extra percent per executed trade");
 
-mk_head("ACTIONS", LX, 0.350, LW);
-gui.btn_run = mk_button("Run Analysis", LX, 0.303, LW, "on_run_analysis()", "Fit the selected model and evaluate it on the test window");
-gui.btn_compare = mk_button("Compare Models", LX, 0.259, LW, "on_compare()", "Naive vs LR vs AR vs ES on the same window, with ranking");
-gui.btn_backtest = mk_button("Run Backtest", LX, 0.215, LW, "on_run_backtest()", "Trade the model signals vs buy & hold (needs Run Analysis)");
-gui.btn_wf = mk_button("Walk Forward Validation", LX, 0.171, LW, "on_walk_forward()", "Expanding-window validation over several chronological folds");
-gui.btn_export = mk_button("Export Results", LX, 0.127, LW, "on_export()", "Save report (.txt) + CSV tables, a CSV, or chart PDF");
-gui.btn_info = mk_button("Model Info", LX, 0.083, 0.093, "on_model_info()", "Assumptions and limitations of the selected model");
-gui.btn_reset = mk_button("Reset", LX + 0.097, 0.083, 0.093, "on_reset()", "Restore default settings and clear results");
+mk_head("ACTIONS", LX, 0.342, LW);
+gui.btn_run = mk_button("Run Analysis", LX, 0.294, LW, "on_run_analysis()", "Fit the selected model and evaluate it on the test window");
+gui.btn_compare = mk_button("Compare Models", LX, 0.244, LW, "on_compare()", "Naive vs LR vs AR vs ES on the same window, with ranking");
+gui.btn_backtest = mk_button("Run Backtest", LX, 0.194, LW, "on_run_backtest()", "Trade the model signals vs buy & hold (needs Run Analysis)");
+gui.btn_wf = mk_button("Walk Forward Validation", LX, 0.144, LW, "on_walk_forward()", "Expanding-window validation over several chronological folds");
+gui.btn_export = mk_button("Export Results", LX, 0.094, LW, "on_export()", "Save report (.txt) + CSV tables, a CSV, or chart PDF");
+gui.btn_info = mk_button("Model Info", LX, 0.044, 0.092, "on_model_info()", "Assumptions and limitations of the selected model");
+gui.btn_reset = mk_button("Reset", LX + 0.098, 0.044, 0.092, "on_reset()", "Restore default settings and clear results");
 
 // --- right area: dashboard panels ----------------------------------------------
-RX = 0.202;
+RX = 0.204;
+RW = 0.788;
 function ph = mk_placeholder(x, y, w, hh)
     // White frame + centred grey text shown while a chart has no data yet.
     global gui
@@ -1081,48 +1115,53 @@ function ph = mk_placeholder(x, y, w, hh)
                    "backgroundcolor", [1 1 1]);
     tx = uicontrol(gui.fig, "style", "text", "string", "", "units", "normalized", ..
                    "position", [x, y + hh/2 - 0.015, w, 0.03], "backgroundcolor", [1 1 1], ..
-                   "foregroundcolor", [0.5 0.5 0.5], "fontsize", 13, "horizontalalignment", "center");
+                   "foregroundcolor", [0.45 0.50 0.58], "fontsize", 13, "fontweight", "bold", ..
+                   "fontname", "Segoe UI", "horizontalalignment", "center");
     ph = list(fr, tx);
 endfunction
 
 
 // Row A: main chart + info panel (data quality / assumptions / interpretation tabs)
-gui.head_main = mk_head("PRICE & PREDICTION", RX, 0.658 + 0.282 - 0.024, 0.498);
+gui.head_main = mk_head("PRICE & PREDICTION", RX, 0.656 + 0.280 - HEAD_H, 0.496);
 gui.key_main = uicontrol(gui.fig, "style", "text", "string", "", "units", "normalized", ..
-    "position", [RX 0.658 + 0.282 - 0.024 - 0.024 0.498 0.024], "backgroundcolor", [1 1 1], "fontsize", 10, ..
+    "position", [RX 0.656 + 0.280 - HEAD_H - 0.024 0.496 0.024], "backgroundcolor", [1 1 1], "fontsize", 11, ..
     "horizontalalignment", "left");
-gui.ax_main = make_axes(RX, 0.658, 0.498, 0.282 - 0.048);
-[gui.lb_info, gui.head_info] = mk_list_panel("INFO", 0.706, 0.658, 0.288, 0.282);
+gui.ax_main = make_axes(RX, 0.656, 0.496, 0.280 - HEAD_H - 0.024);
+[gui.lb_info, gui.head_info] = mk_list_panel("INFO", 0.704, 0.656, 0.288, 0.280);
+y_tab = 0.656 + 0.280 - HEAD_H + 0.002;
 gui.tab_dq = uicontrol(gui.fig, "style", "pushbutton", "string", "Data Quality", "units", "normalized", ..
-    "position", [0.748 0.9165 0.080 0.022], "fontsize", 10, "callback", "show_info_tab(""dq"")", ..
+    "position", [0.716 y_tab 0.088 0.024], "fontsize", 11, "fontname", "Segoe UI", "callback", "show_info_tab(""dq"")", ..
     "tooltipstring", "Rows, date range, missing/duplicate/invalid rows, train/test rows, anomalies");
 gui.tab_asm = uicontrol(gui.fig, "style", "pushbutton", "string", "Assumptions", "units", "normalized", ..
-    "position", [0.831 0.9165 0.080 0.022], "fontsize", 10, "callback", "show_info_tab(""asm"")", ..
+    "position", [0.808 y_tab 0.088 0.024], "fontsize", 11, "fontname", "Segoe UI", "callback", "show_info_tab(""asm"")", ..
     "tooltipstring", "Capital, costs, slippage, signal lag, position rule, periods");
 gui.tab_interp = uicontrol(gui.fig, "style", "pushbutton", "string", "Interpretation", "units", "normalized", ..
-    "position", [0.914 0.9165 0.080 0.022], "fontsize", 10, "callback", "show_info_tab(""interp"")", ..
+    "position", [0.900 y_tab 0.090 0.024], "fontsize", 11, "fontname", "Segoe UI", "callback", "show_info_tab(""interp"")", ..
     "tooltipstring", "Dynamic quantitative research interpretation & statistical conclusions");
+
 // Row B: results + comparison/ranking + comparison chart
-[gui.lb_res, gui.head_res] = mk_list_panel("MODEL RESULTS", RX, 0.340, 0.205, 0.315);
-[gui.lb_cmp, gui.head_cmp] = mk_list_panel("MODEL COMPARISON & RANKING", 0.412, 0.340, 0.288, 0.315);
-[gui.ax_cmp, gui.head_cmpchart] = mk_axes_panel("MODEL COMPARISON CHART", 0.706, 0.340, 0.288, 0.315);
+[gui.lb_res, gui.head_res] = mk_list_panel("MODEL RESULTS", RX, 0.344, 0.204, 0.306);
+[gui.lb_cmp, gui.head_cmp] = mk_list_panel("MODEL COMPARISON & RANKING", 0.412, 0.344, 0.288, 0.306);
+[gui.ax_cmp, gui.head_cmpchart] = mk_axes_panel("MODEL COMPARISON CHART", 0.704, 0.344, 0.288, 0.306);
+
 // Backtest summary strip
 gui.strip = uicontrol(gui.fig, "style", "text", "string", "  Backtest summary: not run yet", "units", "normalized", ..
-    "position", [RX 0.316 0.792 0.022], "backgroundcolor", [0.86 0.90 0.95], "fontsize", 12, ..
-    "fontweight", "bold", "horizontalalignment", "left");
-// Row C: equity chart + backtest summary + walk-forward
-[gui.ax_eq, gui.head_eq] = mk_axes_panel("BACKTEST: EQUITY CURVE", RX, 0.044, 0.290, 0.268);
-[gui.lb_bt, gui.head_bt] = mk_list_panel("BACKTEST SUMMARY (strategy vs buy & hold)", 0.497, 0.044, 0.203, 0.268);
-[gui.lb_wf, gui.head_wf] = mk_list_panel("WALK-FORWARD VALIDATION", 0.706, 0.044, 0.288, 0.268);
+    "position", [RX 0.316 RW 0.024], "backgroundcolor", GUI_STRIP_BG, "foregroundcolor", GUI_STRIP_FG, ..
+    "fontsize", 13, "fontweight", "bold", "fontname", "Segoe UI", "horizontalalignment", "left");
 
-gui.ph_main = mk_placeholder(RX, 0.658, 0.498, 0.234);
-gui.ph_cmp = mk_placeholder(0.706, 0.340, 0.288, 0.291);
-gui.ph_eq = mk_placeholder(RX, 0.044, 0.290, 0.244);
+// Row C: equity chart + backtest summary + walk-forward
+[gui.ax_eq, gui.head_eq] = mk_axes_panel("BACKTEST: EQUITY CURVE", RX, 0.044, 0.288, 0.268);
+[gui.lb_bt, gui.head_bt] = mk_list_panel("BACKTEST SUMMARY (strategy vs buy & hold)", 0.496, 0.044, 0.204, 0.268);
+[gui.lb_wf, gui.head_wf] = mk_list_panel("WALK-FORWARD VALIDATION", 0.704, 0.044, 0.288, 0.268);
+
+gui.ph_main = mk_placeholder(RX, 0.656, 0.496, 0.228);
+gui.ph_cmp = mk_placeholder(0.704, 0.344, 0.288, 0.278);
+gui.ph_eq = mk_placeholder(RX, 0.044, 0.288, 0.240);
 
 // --- status bar -------------------------------------------------------------------
-gui.status = uicontrol(gui.fig, "style", "text", "string", " Ready.", "units", "normalized", ..
-    "position", [0 0 1 0.036], "backgroundcolor", [0.82 0.84 0.88], "foregroundcolor", [0.15 0.15 0.15], ..
-    "fontsize", 12, "fontweight", "bold", "horizontalalignment", "left");
+gui.status = uicontrol(gui.fig, "style", "text", "string", "  Ready.", "units", "normalized", ..
+    "position", [0 0 1 0.036], "backgroundcolor", GUI_STATUS_BG, "foregroundcolor", [0.10 0.16 0.26], ..
+    "fontsize", 13, "fontweight", "bold", "fontname", "Segoe UI", "horizontalalignment", "left");
 
 
 function on_split_moved_wrapper()
