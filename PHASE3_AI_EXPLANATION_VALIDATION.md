@@ -1,6 +1,7 @@
 # StockVision Scilab GUI — Phase 3: AI Explanation Assistant & Forecast Intelligence Report
 
 **Repository:** `https://github.com/Subodh-17/stockvision-scilab-gui`  
+**Commit:** `3680690`  
 **Base Commits:** `c8d509d`, `d1ca6bf`  
 **Release Target:** Phase 3 Production Release  
 **Local Root:** `E:\Projects\StockVision`  
