@@ -24,6 +24,7 @@ catch
 end
 global APP_DIR;
 exec(APP_DIR + "model_engine.sce", -1);
+exec(APP_DIR + "market_data_adapter.sce", -1);
 
 global gui app_state gui_quiet ES_ALPHA ES_BETA GUI_BG GUI_HEAD;
 if ~exists("gui_quiet") | isempty(gui_quiet) then gui_quiet = %f; end   // %t: print instead of dialogs
@@ -33,11 +34,22 @@ gui = struct();
 app_state = struct();
 app_state.dataset_files = [APP_DIR + "sample_data/tech_growth_stock.csv", ..
                            APP_DIR + "sample_data/blue_chip_stock.csv", ..
-                           APP_DIR + "sample_data/volatile_stock.csv"];
-app_state.dataset_labels = ["Tech Growth Stock (synthetic)", "Blue Chip Stock (synthetic)", ..
-                            "Volatile Stock (synthetic)"];
+                           APP_DIR + "sample_data/volatile_stock.csv", ..
+                           "", "", "", ..
+                           APP_DIR + "sample_data/mock_market_data/mock_twelvedata_aapl.json", ..
+                           APP_DIR + "sample_data/mock_market_data/mock_twelvedata_infy_nse.json"];
+app_state.dataset_labels = ["Tech Growth Stock (synthetic)", ..
+                            "Blue Chip Stock (synthetic)", ..
+                            "Volatile Stock (synthetic)", ..
+                            "Live Market: US Stock (Twelve Data)", ..
+                            "Live Market: India NSE (Twelve Data)", ..
+                            "Live Market: India BSE (Twelve Data)", ..
+                            "Mock Market: US AAPL (Offline)", ..
+                            "Mock Market: India INFY (Offline)"];
 app_state.dataset_idx = 1;
 app_state.custom_path = "";
+app_state.symbol = "AAPL";
+app_state.exchange = "NASDAQ";
 app_state.data = [];
 app_state.dq = [];
 app_state.model_type = "LR";
@@ -362,7 +374,9 @@ function draw_main_chart()
     ax.title.text = r.name + ": actual vs predicted (test window + equal training context)";
     ax.title.font_size = 3;
     ax.font_size = 2;
-    ax.y_label.text = "Price"; ax.x_label.text = "Date (yy-mm-dd)";
+    cur_unit = "USD";
+    if isfield(d, "currency") & d.currency <> "" then cur_unit = d.currency; end
+    ax.y_label.text = "Price (" + cur_unit + ")"; ax.x_label.text = "Date (yy-mm-dd)";
     ax.x_label.font_size = 2; ax.y_label.font_size = 2;
     set(gui.key_main, "string", main_key_html(app_state.show_ma));
     set(gui.head_main, "string", "  PRICE & PREDICTION -- " + r.name);
@@ -502,10 +516,15 @@ endfunction
 
 function s = dataset_label()
     global app_state
-    if app_state.dataset_idx <= size(app_state.dataset_labels, 2) then
+    if app_state.custom_path <> "" then
+        s = "Custom: " + app_state.custom_path;
+    elseif has(app_state.data) & isfield(app_state.data, "source_mode") & ..
+           (app_state.data.source_mode == "LIVE_MARKET" | app_state.data.source_mode == "MOCK_MARKET") then
+        s = app_state.data.symbol + " (" + app_state.data.exchange + ", " + app_state.data.provider + ")";
+    elseif app_state.dataset_idx <= size(app_state.dataset_labels, 2) then
         s = app_state.dataset_labels(app_state.dataset_idx);
     else
-        s = "Custom: " + app_state.custom_path;
+        s = "Dataset " + string(app_state.dataset_idx);
     end
 endfunction
 
@@ -580,23 +599,53 @@ endfunction
 // State changes and actions
 // ---------------------------------------------------------------------------
 function ok = load_current_dataset()
-    // Loads the selected CSV into app_state; shows a clear error otherwise.
+    // Loads the selected CSV or mock fixture into app_state; shows a clear error otherwise.
     global gui app_state
     ok = %f;
-    if app_state.dataset_idx <= size(app_state.dataset_files, 2) then
-        path = app_state.dataset_files(app_state.dataset_idx);
-    else
+    path = "";
+    if app_state.custom_path <> "" then
         path = app_state.custom_path;
+    elseif app_state.dataset_idx <= size(app_state.dataset_files, 2) then
+        path = app_state.dataset_files(app_state.dataset_idx);
     end
+
+    // Check if selecting an offline mock fixture (.json)
+    if length(path) >= 5 & part(path, length(path)-4:length(path)) == ".json" then
+        set_status("Loading offline market fixture...");
+        try
+            if strindex(path, "infy") <> [] then
+                d = mda_load_mock(path, "INFY", "NSE");
+            else
+                d = mda_load_mock(path, "AAPL", "NASDAQ");
+            end
+        catch
+            msg = strcat(lasterror(), " ");
+            app_state.data = []; app_state.dq = [];
+            set_status("Could not load mock fixture (see message).", "error");
+            show_dialog("Fixture error", msg, "error");
+            return;
+        end
+        app_state.data = d;
+        app_state.dq = data_quality_summary(d, app_state.split_ratio);
+        ok = %t;
+        return;
+    end
+
+    // If path is empty (live market options 4, 5, 6), wait for Fetch button
+    if path == "" then
+        set_status("Live market feed selected. Enter ticker symbol and click Fetch Live.", "info");
+        return;
+    end
+
     set_status("Loading dataset...");
     try
         d = load_dataset(path);
     catch
-        msg = lasterror();
+        msg = strcat(lasterror(), " ");
         app_state.data = []; app_state.dq = [];
         set_status("Could not load dataset (see message).", "error");
         show_dialog("Dataset error", msg, "error");
-        return
+        return;
     end
     set_status("Validating data...");
     app_state.data = d;
@@ -631,11 +680,86 @@ endfunction
 function on_dataset_changed()
     global gui app_state
     app_state.dataset_idx = get(gui.dataset_popup, "value");
+    app_state.custom_path = "";
+    if app_state.dataset_idx == 4 then
+        set(gui.ed_symbol, "string", "AAPL");
+        set_status("Selected Live US Stock (Twelve Data). Enter ticker (e.g. AAPL, MSFT) and click Fetch Live.", "info");
+        return;
+    elseif app_state.dataset_idx == 5 then
+        set(gui.ed_symbol, "string", "INFY");
+        set_status("Selected Live India NSE (Twelve Data). Enter ticker (e.g. INFY, RELIANCE) and click Fetch Live.", "info");
+        return;
+    elseif app_state.dataset_idx == 6 then
+        set(gui.ed_symbol, "string", "RELIANCE");
+        set_status("Selected Live India BSE (Twelve Data). Enter ticker and click Fetch Live.", "info");
+        return;
+    elseif app_state.dataset_idx == 7 then
+        set(gui.ed_symbol, "string", "AAPL");
+    elseif app_state.dataset_idx == 8 then
+        set(gui.ed_symbol, "string", "INFY");
+    end
+
     if load_current_dataset() then
         invalidate("all", "Dataset changed -- previous results cleared. Click Run Analysis.");
     else
         invalidate("all");
     end
+endfunction
+
+
+function on_symbol_changed()
+    global gui app_state
+    sym = stripblanks(get(gui.ed_symbol, "string"));
+    app_state.symbol = convstr(sym, "u");
+endfunction
+
+
+function on_fetch_market_data()
+    global gui app_state
+    sym = stripblanks(get(gui.ed_symbol, "string"));
+    if sym == "" then
+        set_status("Please enter a ticker symbol to fetch (e.g. AAPL, INFY).", "error");
+        show_dialog("Market Data Error", "Ticker symbol cannot be empty.", "error");
+        return;
+    end
+    sym = convstr(sym, "u");
+
+    // Determine exchange from dataset selection or symbol suffix
+    exch = "AUTO";
+    idx = get(gui.dataset_popup, "value");
+    if idx == 5 then
+        exch = "NSE";
+    elseif idx == 6 then
+        exch = "BSE";
+    elseif idx == 4 then
+        exch = "NASDAQ";
+    end
+
+    // Handle symbols with exchange suffix like INFY.NS or RELIANCE.BO
+    if length(sym) > 3 & part(sym, length(sym)-2:length(sym)) == ".NS" then
+        sym = part(sym, 1:length(sym)-3);
+        exch = "NSE";
+    elseif length(sym) > 3 & part(sym, length(sym)-2:length(sym)) == ".BO" then
+        sym = part(sym, 1:length(sym)-3);
+        exch = "BSE";
+    end
+
+    set_status("Fetching market data for [" + sym + "] (" + exch + ") from Twelve Data...");
+    try
+        d = mda_fetch_market_data(sym, exch, 120, %f);
+    catch
+        err_msg = strcat(lasterror(), " ");
+        set_status("Fetch failed: " + err_msg, "error");
+        show_dialog("Market Data Fetch Error", err_msg, "error");
+        return;
+    end
+
+    app_state.custom_path = "";
+    app_state.data = d;
+    app_state.dq = data_quality_summary(d, app_state.split_ratio);
+    invalidate("all", "Market data loaded: " + sym + " (" + exch + ", " + string(d.n) + " bars). Click Run Analysis.");
+    show_info_tab("dq");
+    set_status("Market data loaded: " + sym + " (" + exch + ", " + string(d.n) + " bars, " + d.data_freshness + ").", "ok");
 endfunction
 
 
@@ -946,6 +1070,8 @@ function on_reset()
     global gui app_state
     set(gui.dataset_popup, "string", strcat(app_state.dataset_labels, "|"));
     set(gui.dataset_popup, "value", 1); app_state.dataset_idx = 1;
+    app_state.custom_path = "";
+    set(gui.ed_symbol, "string", "AAPL");
     set(gui.model_popup, "value", 1); app_state.model_type = "LR";
     set(gui.split_slider, "value", 0.8); app_state.split_ratio = 0.8;
     set(gui.split_label, "string", "Train/test split: 80% / 20%");
@@ -1040,6 +1166,7 @@ end
 gui.fig.immediate_drawing = "off";
 
 m_file = uimenu(gui.fig, "label", "File");
+uimenu(m_file, "label", "Fetch Real Market Data...", "callback", "on_fetch_market_data()");
 uimenu(m_file, "label", "Load Custom CSV...", "callback", "on_load_custom_csv()");
 uimenu(m_file, "label", "Export Results...", "callback", "on_export()");
 uimenu(m_file, "label", "Exit", "callback", "close(gui.fig)");
@@ -1058,52 +1185,59 @@ gui.subtitle = uicontrol(gui.fig, "style", "text", "units", "normalized", ..
 
 // --- left column: controls ------------------------------------------------------
 LX = 0.008; LW = 0.190;
-mk_head("DATASET & MODEL", LX, 0.908, LW);
-mk_text("Dataset", LX, 0.880, LW, 0.022, %f, "left");
+mk_head("DATASET & MARKET FEED", LX, 0.908, LW);
+mk_text("Market Feed / Dataset", LX, 0.882, LW, 0.020, %f, "left");
 gui.dataset_popup = uicontrol(gui.fig, "style", "popupmenu", "string", strcat(app_state.dataset_labels, "|"), ..
-    "units", "normalized", "position", [LX 0.848 LW 0.030], "fontsize", 12, "fontname", "Segoe UI", "value", 1, ..
-    "callback", "on_dataset_changed()", "tooltipstring", "Bundled synthetic datasets, or File > Load Custom CSV");
-mk_text("Model", LX, 0.820, LW, 0.022, %f, "left");
+    "units", "normalized", "position", [LX 0.854 LW 0.026], "fontsize", 11, "fontname", "Segoe UI", "value", 1, ..
+    "callback", "on_dataset_changed()", "tooltipstring", "Bundled synthetic datasets, real market data (Twelve Data), or offline mock");
+
+mk_text("Symbol", LX, 0.826, 0.050, 0.020, %f, "left");
+gui.ed_symbol = mk_edit("AAPL", LX + 0.050, 0.824, 0.054, "on_symbol_changed()", "Ticker symbol (e.g. AAPL, MSFT, INFY, RELIANCE)");
+gui.btn_fetch = uicontrol(gui.fig, "style", "pushbutton", "string", "Fetch Live", "units", "normalized", ..
+    "position", [LX + 0.108 0.822 0.082 0.028], "fontsize", 11, "fontweight", "bold", "fontname", "Segoe UI", ..
+    "callback", "on_fetch_market_data()", "tooltipstring", "Fetch live daily market data via Twelve Data");
+
+mk_text("Model", LX, 0.796, LW, 0.020, %f, "left");
 gui.model_popup = uicontrol(gui.fig, "style", "popupmenu", ..
     "string", "Linear Regression|AR Time-Series|Exponential Smoothing", ..
-    "units", "normalized", "position", [LX 0.788 LW 0.030], "fontsize", 12, "fontname", "Segoe UI", "value", 1, ..
+    "units", "normalized", "position", [LX 0.768 LW 0.026], "fontsize", 11, "fontname", "Segoe UI", "value", 1, ..
     "callback", "on_model_changed()", "tooltipstring", "Model analysed by Run Analysis and Run Backtest");
 
-mk_head("PARAMETERS", LX, 0.752, LW);
-mk_text("Train / test split", LX, 0.726, LW, 0.022, %f, "left");
+mk_head("PARAMETERS", LX, 0.736, LW);
+mk_text("Train / test split", LX, 0.712, LW, 0.020, %f, "left");
 gui.split_slider = uicontrol(gui.fig, "style", "slider", "min", 0.5, "max", 0.95, "value", 0.8, ..
-    "units", "normalized", "position", [LX 0.702 LW 0.022], "callback", "on_split_moved_wrapper()", ..
+    "units", "normalized", "position", [LX 0.690 LW 0.020], "callback", "on_split_moved_wrapper()", ..
     "tooltipstring", "Share of rows used for training. The rest is the test window.");
-gui.split_label = mk_text("Train/test split: 80% / 20%", LX, 0.678, LW, 0.022, %t, "left");
+gui.split_label = mk_text("Train/test split: 80% / 20%", LX, 0.668, LW, 0.020, %t, "left");
 gui.cb_ma = uicontrol(gui.fig, "style", "checkbox", "string", "Show 20-day moving average", "value", 1, ..
-    "units", "normalized", "position", [LX 0.648 LW 0.026], "fontsize", 12, "fontname", "Segoe UI", ..
+    "units", "normalized", "position", [LX 0.640 LW 0.024], "fontsize", 11, "fontname", "Segoe UI", ..
     "backgroundcolor", GUI_BG, "callback", "on_ma_toggled()");
-mk_text("AR lookback (days)", LX, 0.618, 0.125, 0.024, %f, "left");
-gui.ed_lookback = mk_edit("10", 0.135, 0.618, 0.063, "on_model_params_changed()", "Past closes used by the AR model (2-60)");
-mk_text("Walk-forward folds", LX, 0.588, 0.125, 0.024, %f, "left");
-gui.ed_folds = mk_edit("5", 0.135, 0.588, 0.063, "on_model_params_changed()", "Requested folds (1-10); reduced automatically if data is short");
-mk_text("Exp. smoothing: alpha 0.30, beta 0.10 (fixed)", LX, 0.560, LW, 0.022, %f, "left");
+mk_text("AR lookback (days)", LX, 0.612, 0.125, 0.022, %f, "left");
+gui.ed_lookback = mk_edit("10", 0.135, 0.612, 0.063, "on_model_params_changed()", "Past closes used by the AR model (2-60)");
+mk_text("Walk-forward folds", LX, 0.584, 0.125, 0.022, %f, "left");
+gui.ed_folds = mk_edit("5", 0.135, 0.584, 0.063, "on_model_params_changed()", "Requested folds (1-10); reduced automatically if data is short");
+mk_text("Exp. smoothing: alpha 0.30, beta 0.10 (fixed)", LX, 0.558, LW, 0.020, %f, "left");
 
-mk_head("STRATEGY & COSTS", LX, 0.528, LW);
-mk_text("BUY if forecast >= (%)", LX, 0.498, 0.125, 0.024, %f, "left");
+mk_head("STRATEGY & COSTS", LX, 0.526, LW);
+mk_text("BUY if forecast >= (%)", LX, 0.498, 0.125, 0.022, %f, "left");
 gui.ed_buy = mk_edit("0.5", 0.135, 0.498, 0.063, "on_strategy_changed()", "BUY when predicted change is at least this percent");
-mk_text("SELL if forecast <= (%)", LX, 0.468, 0.125, 0.024, %f, "left");
-gui.ed_sell = mk_edit("-0.5", 0.135, 0.468, 0.063, "on_strategy_changed()", "SELL (exit) when predicted change is at most this percent");
-mk_text("Starting capital", LX, 0.438, 0.125, 0.024, %f, "left");
-gui.ed_capital = mk_edit("100000", 0.135, 0.438, 0.063, "on_strategy_changed()", "Initial portfolio value for the backtest");
-mk_text("Transaction cost (%)", LX, 0.408, 0.125, 0.024, %f, "left");
-gui.ed_cost = mk_edit("0.1", 0.135, 0.408, 0.063, "on_strategy_changed()", "Percent of portfolio value per executed trade");
-mk_text("Slippage (%)", LX, 0.378, 0.125, 0.024, %f, "left");
-gui.ed_slip = mk_edit("0.05", 0.135, 0.378, 0.063, "on_strategy_changed()", "Extra percent per executed trade");
+mk_text("SELL if forecast <= (%)", LX, 0.470, 0.125, 0.022, %f, "left");
+gui.ed_sell = mk_edit("-0.5", 0.135, 0.470, 0.063, "on_strategy_changed()", "SELL (exit) when predicted change is at most this percent");
+mk_text("Starting capital", LX, 0.442, 0.125, 0.022, %f, "left");
+gui.ed_capital = mk_edit("100000", 0.135, 0.442, 0.063, "on_strategy_changed()", "Initial portfolio value for the backtest");
+mk_text("Transaction cost (%)", LX, 0.414, 0.125, 0.022, %f, "left");
+gui.ed_cost = mk_edit("0.1", 0.135, 0.414, 0.063, "on_strategy_changed()", "Percent of portfolio value per executed trade");
+mk_text("Slippage (%)", LX, 0.386, 0.125, 0.022, %f, "left");
+gui.ed_slip = mk_edit("0.05", 0.135, 0.386, 0.063, "on_strategy_changed()", "Extra percent per executed trade");
 
-mk_head("ACTIONS", LX, 0.342, LW);
-gui.btn_run = mk_button("Run Analysis", LX, 0.294, LW, "on_run_analysis()", "Fit the selected model and evaluate it on the test window");
-gui.btn_compare = mk_button("Compare Models", LX, 0.244, LW, "on_compare()", "Naive vs LR vs AR vs ES on the same window, with ranking");
-gui.btn_backtest = mk_button("Run Backtest", LX, 0.194, LW, "on_run_backtest()", "Trade the model signals vs buy & hold (needs Run Analysis)");
-gui.btn_wf = mk_button("Walk Forward Validation", LX, 0.144, LW, "on_walk_forward()", "Expanding-window validation over several chronological folds");
-gui.btn_export = mk_button("Export Results", LX, 0.094, LW, "on_export()", "Save report (.txt) + CSV tables, a CSV, or chart PDF");
-gui.btn_info = mk_button("Model Info", LX, 0.044, 0.092, "on_model_info()", "Assumptions and limitations of the selected model");
-gui.btn_reset = mk_button("Reset", LX + 0.098, 0.044, 0.092, "on_reset()", "Restore default settings and clear results");
+mk_head("ACTIONS", LX, 0.352, LW);
+gui.btn_run = mk_button("Run Analysis", LX, 0.304, LW, "on_run_analysis()", "Fit the selected model and evaluate it on the test window");
+gui.btn_compare = mk_button("Compare Models", LX, 0.256, LW, "on_compare()", "Naive vs LR vs AR vs ES on the same window, with ranking");
+gui.btn_backtest = mk_button("Run Backtest", LX, 0.208, LW, "on_run_backtest()", "Trade the model signals vs buy & hold (needs Run Analysis)");
+gui.btn_wf = mk_button("Walk Forward Validation", LX, 0.160, LW, "on_walk_forward()", "Expanding-window validation over several chronological folds");
+gui.btn_export = mk_button("Export Results", LX, 0.112, LW, "on_export()", "Save report (.txt) + CSV tables, a CSV, or chart PDF");
+gui.btn_info = mk_button("Model Info", LX, 0.058, 0.092, "on_model_info()", "Assumptions and limitations of the selected model");
+gui.btn_reset = mk_button("Reset", LX + 0.098, 0.058, 0.092, "on_reset()", "Restore default settings and clear results");
 
 // --- right area: dashboard panels ----------------------------------------------
 RX = 0.204;

@@ -17,3 +17,8 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# Market Data Configuration & Local Caches (Never commit real API keys or cache files)
+config/market_data_config.json
+cache/
+01_Source_Code/scilab_gui_app/cache/

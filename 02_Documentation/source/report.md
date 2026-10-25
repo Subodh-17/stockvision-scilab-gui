@@ -133,13 +133,14 @@ Position still open at the end (not a trade).
 | Check | Result |
 |--------------|--------------|
 | Engine tests (`test_model_engine.sce`) | 311 checks, 0 failures (Scilab 2026.1.0 on Windows) |
-| GUI workflow test (`test_gui_workflow.sce`) | 45 checks, 0 failures (live callbacks & graphics contexts) |
-| Total automated checks | 356 checks, 0 failures |
+| Market data adapter tests (`test_market_data_adapter.sce`) | 60 checks, 0 failures (Twelve Data API normalization, caching, error codes) |
+| GUI workflow test (`test_gui_workflow.sce`) | 56 checks, 0 failures (live callbacks, market fetch, & graphics contexts) |
+| Total automated checks | 427 checks, 0 failures |
 | Determinism & reproducibility | Bit-for-bit identical predictions and equity curves (`norm == 0`) |
 | Sample-output regeneration | Identical numbers reproduced from engine runs |
 | Platform compatibility | Verified on Windows 11 with Scilab 2026.1.0 and Linux Scilab 2024.0.0 |
 
-The GUI test confirms exactly one graphics window after analyses, comparison, backtest and exports; tab navigation between Data Quality, Assumptions, and Interpretation works cleanly; stale results are cleared on dataset, split, lookback, model, fold, and cost changes; buttons are disabled when prerequisites are missing; invalid inputs yield status-bar messages; exports never overwrite; reset restores defaults; a bad CSV fails cleanly.
+The GUI test confirms exactly one graphics window after analyses, comparison, backtest and exports; tab navigation between Data Quality, Assumptions, and Interpretation works cleanly; market data fetch (live and offline mock fixtures) executes with complete provider provenance and currency scaling; stale results are cleared on dataset, split, lookback, model, fold, and cost changes; buttons are disabled when prerequisites are missing; invalid inputs yield status-bar messages; exports never overwrite; reset restores defaults; a bad CSV fails cleanly.
 
 # 9. Response to the hackathon feedback & V3 differentiation
 
@@ -150,10 +151,11 @@ The GUI test confirms exactly one graphics window after analyses, comparison, ba
 | Comparison with other submissions | Same-window four-way comparison, walk-forward, ranking, baseline verdicts, data-quality summary, richer export | Section 4; screenshots 06, 08 |
 | Simplified modelling/backtesting assumptions | Assumptions panel; naive baseline; buy-and-hold benchmark; costs on every trade; execution lag tests; Model Info limitations | Section 6; screenshot 07 |
 | **V3 Quantitative Differentiation** | Exact Student's $t$ 95% prediction intervals with leverage, Theil's U/U2 metrics, data-quality anomaly detection, dynamic research interpretation tab, Calmar ratio, market exposure % | `model_engine.sce`, `gui_app.sce`, Tests 20-21 |
+| **Real Market Data Integration** | Native Twelve Data adapter for US equities and Indian NSE/BSE stocks, 4h local cache, offline mock fixtures, explicit HTTP 429/404/401 error handling with strict no-silent-fallback rule | `market_data_adapter.sce`, `test_market_data_adapter.sce`, `gui_app.sce` |
 
 # 10. Limitations and future work
 
-Synthetic data only; single split for headline metrics and noisy short test windows; no significance testing; fixed ES parameters and an untuned AR lookback; no regularization for LR; long/cash backtest without spreads or market impact; PDF export covers the three charts only. Possible next steps: live historical market feeds, expanding hyperparameter search inside walk-forward folds, bootstrap confidence intervals on metric differences, regularized regression (Lasso/Ridge), and execution slippage models based on bar volume.
+Real market data feeds (Twelve Data free tier) provide 15-minute delayed or end-of-day daily bars (8 API credits/min); bundled synthetic benchmarks and prepackaged offline mock feeds remain available as explicit offline fallbacks. Single split for headline metrics and noisy short test windows; no significance testing; fixed ES parameters and an untuned AR lookback; no regularization for LR; long/cash backtest without spreads or market impact; PDF export covers the three charts only. Possible next steps: expanding hyperparameter search inside walk-forward folds, bootstrap confidence intervals on metric differences, regularized regression (Lasso/Ridge), and execution slippage models based on bar volume.
 
 # 11. License
 

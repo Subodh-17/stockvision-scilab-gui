@@ -1,0 +1,5 @@
+{
+  "code": 401,
+  "message": "apikey parameter is invalid or missing. Provide a valid Twelve Data API key.",
+  "status": "error"
+}

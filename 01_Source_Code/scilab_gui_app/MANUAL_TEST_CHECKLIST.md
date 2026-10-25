@@ -4,8 +4,10 @@ Run from this folder in Scilab: `exec("gui_app.sce", -1);`
 Recommended window: about 1500 x 980 px (the window shrinks to the screen; text panels then scroll).
 
 Automated coverage that does **not** replace this list:
-`test_model_engine.sce` (311 checks, 0 failures on Scilab 2026.1.0) and `test_gui_workflow.sce` (45 checks, 0 failures,
-drives the real GUI callbacks and graphics contexts).
+- `test_model_engine.sce` (311 checks, 0 failures on Scilab 2026.1.0)
+- `test_market_data_adapter.sce` (60 checks, 0 failures on Scilab 2026.1.0)
+- `test_gui_workflow.sce` (56 checks, 0 failures, drives the real GUI callbacks and graphics contexts)
+- Total automated assertions: 427 checks (100% passing)
 
 ## A. Launch and single-window rule
 - [ ] The app opens **one** figure window with title band ("STOCKVISION V3"), left controls, and panels for price chart,
@@ -23,6 +25,22 @@ drives the real GUI callbacks and graphics contexts).
 - [ ] File > Load Custom CSV > `sample_data/messy_demo_data_quality.csv`: Chronological order = NO (sorted on load),
       Invalid OHLC rows = 1, "1 rows dropped on load" (118 rows kept of 120).
 - [ ] A CSV with a wrong header or a duplicate date shows an error dialog and the app stays usable.
+
+## B2. Real market data & provider provenance (Twelve Data)
+- [ ] Select **Live Market: US Stock (Twelve Data)** or enter ticker `AAPL`: click **Fetch Live**.
+      - Status bar indicates retrieval progress.
+      - On success: Data Quality panel displays Data Provider (`Twelve Data`), Data Freshness (`Delayed 15m / End-of-Day`), Attribution notice (`Twelve Data`), Exchange (`NASDAQ`), Timezone (`America/New_York`), and retrieval timestamp.
+      - Chart displays prices in USD (`Price (USD)`).
+- [ ] Select **Live Market: India NSE (Twelve Data)** or enter ticker `INFY`: click **Fetch Live**.
+      - Data Quality panel displays Indian exchange (`NSE`), Timezone (`Asia/Kolkata`), Currency (`INR`).
+      - Chart Y-axis automatically displays `Price (INR)`.
+- [ ] Offline Mock Fixtures: select `Mock Market: US AAPL (Offline)` or `Mock Market: India INFY (Offline)`.
+      - Instantly loads prepackaged 65-bar market feed fixture without network access.
+- [ ] Local Caching: re-fetching the same symbol within the configured 4-hour TTL loads from local cache with `[Local Cache Hit]` provenance label.
+- [ ] Error Handling & No-Silent-Fallback Rule:
+      - Empty ticker symbol triggers clear status error: "Ticker symbol cannot be empty."
+      - Unconfigured API key raises explicit configuration notice directing user to `config/market_data_config.json` or `TWELVE_DATA_API_KEY`.
+      - Under no circumstances does a fetch error silently substitute synthetic data. Prepackaged synthetic datasets remain available as explicitly labeled offline fallbacks.
 
 ## C. Single-model analysis (repeat for each model)
 - [ ] Choose Linear Regression, AR Time-Series, Exponential Smoothing; click **Run Analysis**.

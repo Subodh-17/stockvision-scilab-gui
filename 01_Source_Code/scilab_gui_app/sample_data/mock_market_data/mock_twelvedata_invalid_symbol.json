@@ -1,0 +1,5 @@
+{
+  "code": 404,
+  "message": "symbol not found: INVALID_TICKER. Please check the ticker symbol and exchange.",
+  "status": "error"
+}

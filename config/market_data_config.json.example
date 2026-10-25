@@ -1,0 +1,9 @@
+{
+  "provider": "twelvedata",
+  "api_key": "YOUR_TWELVE_DATA_API_KEY_HERE",
+  "cache_enabled": true,
+  "cache_ttl_hours": 4,
+  "default_outputsize": 120,
+  "supported_exchanges": ["NASDAQ", "NYSE", "NSE", "BSE"],
+  "attribution": "Data provided by Twelve Data (twelvedata.com)"
+}

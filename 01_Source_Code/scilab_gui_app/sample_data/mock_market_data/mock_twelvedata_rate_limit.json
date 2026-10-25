@@ -1,0 +1,5 @@
+{
+  "code": 429,
+  "message": "You have run out of API credits for the current minute. 8 credits/minute is the current limit. Please wait 60 seconds or upgrade your Twelve Data plan.",
+  "status": "error"
+}

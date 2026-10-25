@@ -397,6 +397,29 @@ function dq = data_quality_summary(data, split_ratio)
     else
         dq.test_first = "n/a";
     end
+
+    // Provider provenance metadata (for real market feeds or synthetic benchmarks)
+    if isfield(data, "provider") then
+        dq.provider = data.provider;
+        dq.symbol = data.symbol;
+        dq.exchange = data.exchange;
+        dq.currency = data.currency;
+        dq.timezone = data.timezone;
+        dq.data_freshness = data.data_freshness;
+        dq.retrieval_time = data.retrieval_time;
+        dq.attribution = data.attribution;
+        dq.source_mode = data.source_mode;
+    else
+        dq.provider = "Synthetic (Offline)";
+        dq.symbol = "SYNTH";
+        dq.exchange = "Simulation";
+        dq.currency = "USD";
+        dq.timezone = "UTC";
+        dq.data_freshness = "Offline Synthetic Benchmark";
+        dq.retrieval_time = "N/A (Prepackaged)";
+        dq.attribution = "StockVision Synthetic Reference Benchmark";
+        dq.source_mode = "SYNTHETIC";
+    end
 endfunction
 
 
@@ -1503,7 +1526,25 @@ function lines = format_data_quality(dq, label)
         anom_str = string(dq.anomalies_detected) + " (" + string(dq.price_jumps) + " jumps >50%, " + ..
                    string(dq.zero_volume_bars) + " zero-vol, " + string(dq.date_gaps) + " gaps)";
     end
+    prov_str = "Synthetic (Offline)";
+    fresh_str = "Offline Synthetic Benchmark";
+    attr_str = "StockVision Synthetic Reference Benchmark";
+    sym_str = "SYNTH (Simulation, UTC, USD)";
+    time_str = "N/A (Prepackaged)";
+    if isfield(dq, "provider") & dq.provider <> "" then prov_str = dq.provider; end
+    if isfield(dq, "data_freshness") & dq.data_freshness <> "" then fresh_str = dq.data_freshness; end
+    if isfield(dq, "attribution") & dq.attribution <> "" then attr_str = dq.attribution; end
+    if isfield(dq, "symbol") & isfield(dq, "exchange") then
+        sym_str = dq.symbol + " (" + dq.exchange + ", " + dq.timezone + ", " + dq.currency + ")";
+    end
+    if isfield(dq, "retrieval_time") & dq.retrieval_time <> "" then time_str = dq.retrieval_time; end
+
     lines = [ ..
+        "Data Provider:       " + prov_str; ..
+        "Data Freshness:      " + fresh_str; ..
+        "Attribution:         " + attr_str; ..
+        "Symbol / Exchange:   " + sym_str; ..
+        "Retrieval Time:      " + time_str; ..
         "Rows:                " + string(dq.rows); ..
         "Date range:          " + dq.date_first + " -> " + dq.date_last; ..
         "Missing values:      " + fmt_num(dq.missing_remaining, 0) + " (" + string(dq.missing_dropped) + " rows dropped on load)"; ..

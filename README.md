@@ -11,10 +11,10 @@ I built StockVision as an interactive Scilab desktop application for stock-marke
 
 # 1. What StockVision does
 
-- Loads OHLCV CSV data (three bundled synthetic datasets or a custom file), validates it, flags anomalies (price spikes >50%, zero volume, date gaps >14 days), and reports data quality.
+- Ingests real market data (US & Indian stocks via Twelve Data API), prepackaged offline mock feeds, bundled synthetic datasets, or custom CSV files, validating OHLCV integrity, flagging anomalies (price spikes >50%, zero volume, date gaps >14 days), and preserving full provider provenance.
 - Fits **Linear Regression**, an **AR (autoregressive)** time-series model, and **Holt exponential smoothing**, alongside a **naive last-value baseline**.
 - Generates exact **95% prediction intervals** incorporating residual variance and feature leverage for next-step forecasts.
-- Evaluates all four models on one shared chronological test window with RMSE, MAE, MAPE (zero-price safe), R^2, directional accuracy, and sample power counters.
+- Evaluates all four models on one shared chronological test window with RMSE, MAE, MAPE (zero-price safe), R^2, directional accuracy, Theil's $U_1$ and $U_2$, and sample power counters.
 - Runs expanding-window **walk-forward validation** across multiple folds, tracking fold RMSE standard deviation and total evaluated observations.
 - Synthesizes a **dynamic quantitative research interpretation** covering benchmark rankings, naive comparison, directional timing, sample power, and methodological caveats.
 - Backtests strategy signals with a one-day execution lag, configurable transaction costs, and slippage against a **buy-and-hold** benchmark over the same period, reporting return, drawdown, Sharpe, Calmar ratio, market exposure %, and cumulative costs paid.
@@ -32,6 +32,7 @@ Everything is core Scilab, with no toolboxes and no external dependencies:
 - **Numerics:** least squares through the backslash operator, vectors/matrices for features and metrics.
 - **Plotting:** `plot`, `bar`, tick/legend control inside the embedded axes.
 - **I/O:** `mgetl`/`mputl`, `uiputfile`/`uigetfile`, `xs2pdf`.
+- **Networking & JSON Parsing:** Native Scilab `http_get`, `fromJSON`, and `toJSON` for real-time market data queries and response normalization without external Python or curl binaries.
 
 # 4. Models implemented
 
@@ -70,10 +71,10 @@ Code layout: `model_engine.sce` holds all modelling, uncertainty estimation, dyn
 
 # 6. Data pipeline
 
-1. **Load** `Date,Open,High,Low,Close,Volume` (strict header, `YYYY-MM-DD` dates, plain numbers).
-2. **Validate** each row: field count, real calendar date, numeric values, non-negative volume, positive prices, Low <= Open/Close <= High. Bad rows are dropped and counted.
-3. **Duplicate dates** are rejected with an error. **Unsorted files** are sorted ascending and flagged.
-4. **Quality summary** is shown before modelling: rows, date range, missing values, duplicate dates, chronological order, invalid OHLC rows, training rows, testing rows.
+1. **Acquire** OHLCV data from **Real Market API** (Twelve Data for US equities and Indian NSE/BSE stocks), **Offline Mock Fixtures** (prepackaged 65-bar feeds), **Bundled Synthetic Benchmarks**, or a **Custom CSV**.
+2. **Validate** each row: field count, real calendar date (`YYYY-MM-DD`), numeric values, non-negative volume, positive prices, Low <= Open/Close <= High. Bad rows are dropped and counted.
+3. **Duplicate dates** are rejected with an error. **Unsorted files / feeds** are sorted ascending chronologically and flagged.
+4. **Provenance & Quality summary** is displayed on the Data Quality tab before modelling: Provider (`Twelve Data` vs `Synthetic Benchmark`), exchange timezone, currency, data freshness (`Delayed 15m / EOD` or `Local Cache Hit`), retrieval timestamp, row count, date range, missing values, duplicate dates, chronological order, invalid OHLC rows, training rows, testing rows.
 5. **Split** chronologically (never shuffled): `split_cal = round(n * train_share)` rows before the test window.
 6. **Features/scaling** are computed from training rows only; models are fitted; forecasts are produced for the test window.
 
@@ -131,7 +132,7 @@ Settings: 80/20 split, AR lookback 10, ES alpha 0.3 / beta 0.1, 5 folds. Lower R
 
 # 11. Limitations
 
-- Bundled datasets are synthetic; no live market data. Educational tool, **not investment advice**.
+- Real market data feeds (Twelve Data free tier) provide 15-minute delayed or end-of-day daily bars (8 API credits/min). Prepackaged offline mock feeds and synthetic benchmarks are provided for offline testing. Educational research tool, **not investment advice**.
 - One fixed train/test split for the headline metrics; walk-forward uses five folds on 300 rows.
 - The AR lookback and ES alpha/beta are user-chosen or fixed, not tuned; LR uses all 12 features with no regularization.
 - The backtest covers a short window (typically 60 days), is long/cash only, and omits bid/ask spread, partial fills, intraday moves and market impact. Annualized figures from short windows are extrapolations.
@@ -151,7 +152,10 @@ Tests:
 - **Headless engine tests (311 checks):**
   - Windows: `& "C:\Program Files\scilab-2026.1.0\bin\WScilex-cli.exe" -nb -f test_model_engine.sce`
   - Linux: `scilab-cli -nb -f test_model_engine.sce`
-- **GUI workflow test (45 checks):**
+- **Market data adapter tests (60 checks):**
+  - Windows: `& "C:\Program Files\scilab-2026.1.0\bin\WScilex-cli.exe" -nb -f test_market_data_adapter.sce`
+  - Linux: `scilab-cli -nb -f test_market_data_adapter.sce`
+- **GUI workflow test (56 checks):**
   - Windows: `& "C:\Program Files\scilab-2026.1.0\bin\WScilex-cli.exe" -nb -f test_gui_workflow.sce`
   - Linux: `xvfb-run -a scilab -nw -nb -f test_gui_workflow.sce`
 - **Regenerate sample outputs:**
@@ -159,23 +163,25 @@ Tests:
 
 # 13. How to use
 
-1. Pick a dataset and model; inspect the **Data Quality** tab (checks row count, anomalies, zero volume, date gaps).
-2. Optionally adjust split, AR lookback, thresholds, costs and slippage.
-3. **Run Analysis** to see the forecast, exact 95% prediction interval, metrics and chart in the main window.
-4. **Compare Models** for the four-way table, ranking and chart; switch to the **Interpretation** tab for dynamic research commentary.
-5. **Walk Forward Validation** for per-fold results, fold dispersion (RMSE std dev), and total evaluated observations.
-6. **Run Backtest** for strategy vs buy and hold; check Calmar ratio, exposure %, and cumulative costs paid.
-7. **Export Results** (.txt report + companion CSVs, single CSV, or PDF chart export); **Model Info** for assumptions; **Reset** to restore defaults.
+1. Pick a dataset or market feed; enter ticker symbol (e.g. `AAPL`, `MSFT`, `INFY`, `RELIANCE`) and click **Fetch Live** (or select a prepackaged synthetic/mock dataset).
+2. Inspect the **Data Quality** tab (checks provider provenance, exchange timezone, data freshness, row count, anomalies, zero volume, date gaps).
+3. Optionally adjust split, AR lookback, thresholds, costs and slippage.
+4. **Run Analysis** to see the forecast, exact 95% prediction interval, metrics and chart in the main window.
+5. **Compare Models** for the four-way table, ranking and chart; switch to the **Interpretation** tab for dynamic research commentary.
+6. **Walk Forward Validation** for per-fold results, fold dispersion (RMSE std dev), and total evaluated observations.
+7. **Run Backtest** for strategy vs buy and hold; check Calmar ratio, exposure %, and cumulative costs paid.
+8. **Export Results** (.txt report + companion CSVs, single CSV, or PDF chart export); **Model Info** for assumptions; **Reset** to restore defaults.
 
 # 14. Expected outputs
 
-`outputs/` and `06_Sample_Outputs/` hold reproducible files generated by the engine: `sample_prediction.csv`, `sample_backtest.csv`, `sample_prediction_exponential_smoothing.csv`, `sample_comparison.txt` (and `sample_outputs.txt`). The Export button writes a timestamped report with data quality, parameters, results, exact 95% prediction intervals, comparison, ranking, walk-forward dispersion, assumptions, backtest realism metrics, and dynamic quantitative interpretation, plus companion CSV tables. Existing files are never overwritten; a free `_2`, `_3` name is chosen.
+`outputs/` and `06_Sample_Outputs/` hold reproducible files generated by the engine: `sample_prediction.csv`, `sample_backtest.csv`, `sample_prediction_exponential_smoothing.csv`, `sample_prediction_twelvedata_aapl.csv`, `sample_comparison.txt` (and `sample_outputs.txt`). The Export button writes a timestamped report with data quality, provider metadata, parameters, results, exact 95% prediction intervals, comparison, ranking, walk-forward dispersion, assumptions, backtest realism metrics, and dynamic quantitative interpretation, plus companion CSV tables. Existing files are never overwritten; a free `_2`, `_3` name is chosen.
 
 # 15. Verification summary
 
 - Engine tests (`test_model_engine.sce`): **311 checks, 0 failures** across 21 test sections under Scilab 2026.1.0 on Windows.
-- GUI workflow test (`test_gui_workflow.sce`): **45 checks, 0 failures**, driving live uicontrol callbacks, tab switching, and graphics contexts.
-- **Total automated coverage: 356 test assertions, 0 failures.**
+- Market data adapter tests (`test_market_data_adapter.sce`): **60 checks, 0 failures** covering API parsing, chronological sorting, error status codes, caching TTL, and model integration.
+- GUI workflow test (`test_gui_workflow.sce`): **56 checks, 0 failures**, driving live uicontrol callbacks, market data fetches, tab switching, and graphics contexts.
+- **Total automated coverage: 427 test assertions, 0 failures.**
 - Determinism: Repeated identical runs produce bit-for-bit identical predictions and equity curves (`norm == 0`).
 - Regenerating sample outputs reproduces identical numbers.
 
@@ -197,12 +203,22 @@ Tests:
     - **Data Quality Anomaly Detection:** Non-fatal detection of daily return spikes (>50%), zero-volume bars, and date gaps (>14 days).
     - **Dynamic Quantitative Research Interpretation:** Automated, dynamic synthesis covering benchmark winners, naive comparison, directional timing, sample power, and caveats.
     - **Backtesting Realism Metrics:** Market exposure %, cumulative costs paid, Calmar ratio, and profit factor.
-    - **Verified Scilab 2026.1.0 Runtime:** 356 automated test checks passing with zero failures on Windows.
+    - **Real Market Data Integration (Twelve Data):** Live OHLCV acquisition for US (NASDAQ, NYSE) and Indian (NSE, BSE) stocks via native Scilab `http_get` and `fromJSON`, with 4-hour local caching, offline mock fixtures, explicit error mapping (HTTP 429 rate limit, 404 symbol, 401 auth), and strict no-silent-fallback guarantees.
+    - **Verified Scilab 2026.1.0 Runtime:** 427 automated test checks passing with zero failures on Windows.
 
 # 17. Files
 
 ```
-01_Source_Code/scilab_gui_app/  gui_app.sce  model_engine.sce  test_model_engine.sce
+01_Source_Code/scilab_gui_app/  gui_app.sce  model_engine.sce  market_data_adapter.sce
+                                test_model_engine.sce  test_market_data_adapter.sce
+                                test_gui_workflow.sce  generate_sample_outputs.sce
+                                MANUAL_TEST_CHECKLIST.md  sample_data/  outputs/  tools/
+02_Documentation/  StockVision_README.pdf  StockVision_Project_Report.pdf  source/ (Markdown + CSS + build script for the PDFs)
+03_Demo_Video/  Scilab_demo_video.mp4 (1:48 captioned screen recording, no voice-over)  DEMO_VIDEO_SCRIPT_V2.md
+04_Problem_Statement/  StockVision_Problem_Statement.pdf
+05_GUI_Screenshots/  01..09 PNG        06_Sample_Outputs/  CSV/TXT samples
+config/  market_data_config.json.example
+```
                                 test_gui_workflow.sce  generate_sample_outputs.sce
                                 MANUAL_TEST_CHECKLIST.md  sample_data/  outputs/  tools/
 02_Documentation/  StockVision_README.pdf  StockVision_Project_Report.pdf  source/ (Markdown + CSS + build script for the PDFs)

@@ -8,6 +8,7 @@ catch
 end
 global gui_quiet gui app_state nfail; gui_quiet = %t;
 exec(_DIR + "gui_app.sce", -1);
+global nfail;
 nfail = 0;
 function ck(c, msg)
     global nfail
@@ -109,5 +110,28 @@ bad = TMPDIR + "/bad.csv"; mputl(["Date,Open,High,Low,Close,Vol"; "2024-01-01,1,
 app_state.custom_path = bad; app_state.dataset_idx = 4;
 ok = load_current_dataset();
 ck(~ok & ~has(app_state.data), "bad CSV: load fails cleanly with an error, no crash");
+// Market Data GUI Integration Verification
+ck(isfield(gui, "ed_symbol") & isfield(gui, "btn_fetch"), "market data GUI: symbol edit box and Fetch button exist");
+set(gui.dataset_popup, "value", 7); on_dataset_changed();
+ck(has(app_state.data) & app_state.data.n == 65, "market data GUI: AAPL mock fixture loads with 65 bars");
+ck(app_state.dq.provider == "Twelve Data" & app_state.dq.symbol == "AAPL", "market data GUI: Data Quality retains Twelve Data AAPL provenance");
+on_run_analysis();
+ck(has(app_state.analysis) & app_state.analysis.next_price > 0, "market data GUI: Run Analysis executes on AAPL market feed");
+ck(strindex(gui.ax_main.y_label.text, "USD") <> [], "market data GUI: Y-axis label displays USD currency for AAPL");
+
+set(gui.dataset_popup, "value", 8); on_dataset_changed();
+ck(has(app_state.data) & app_state.data.symbol == "INFY", "market data GUI: INFY mock fixture loads with INFY symbol");
+ck(app_state.dq.currency == "INR" & app_state.dq.exchange == "NSE", "market data GUI: INFY metadata reflects NSE exchange and INR currency");
+on_run_analysis();
+ck(strindex(gui.ax_main.y_label.text, "INR") <> [], "market data GUI: Y-axis label displays INR currency for Indian stock");
+
+// Error handling in GUI (empty symbol)
+set(gui.ed_symbol, "string", "");
+on_fetch_market_data();
+ck(strindex(get(gui.status, "string"), "symbol cannot be empty") <> [] | strindex(get(gui.status, "string"), "enter a ticker") <> [], "market data GUI: empty symbol fetch reports clear status-bar error");
+
+on_reset();
+ck(app_state.dataset_idx == 1 & has(app_state.data), "market data GUI: Reset restores synthetic baseline dataset");
+
 mprintf("\nGUI VERIFICATION: %d failure(s)\n", nfail);
 exit;
