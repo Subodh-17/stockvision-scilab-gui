@@ -1214,4 +1214,4 @@ mprintf("\n========================================\n");
 mprintf("ALL MODEL ENGINE TESTS PASSED\n");
 mprintf("========================================\n");
 
-exit;
+exit(0);

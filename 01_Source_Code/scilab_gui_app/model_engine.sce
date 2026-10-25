@@ -2421,7 +2421,7 @@ function export_results_csv(path, rep)
     L = append_line(L, "Sell_Threshold_pct," + safe_str(cfg.sell));
     if typeof(rep.cmp) == "st" then
         lab = rep.cmp.labels; M = rep.cmp.M;
-        for i = 1:4
+        for i = 1:size(lab, 1)
             L = append_line(L, "WalkForward_RMSE_" + lab(i) + "," + safe_str(M(i, 6)));
         end
         L = append_line(L, "Best_Model," + lab(rep.cmp.rank.best_idx));

@@ -23,3 +23,4 @@ config/market_data_config.json
 config/ai_config.json
 cache/
 01_Source_Code/scilab_gui_app/cache/
+01_Source_Code/scilab_gui_app/outputs/exports/

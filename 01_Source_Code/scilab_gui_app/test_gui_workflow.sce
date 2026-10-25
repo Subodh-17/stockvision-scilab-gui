@@ -134,4 +134,9 @@ on_reset();
 ck(app_state.dataset_idx == 1 & has(app_state.data), "market data GUI: Reset restores synthetic baseline dataset");
 
 mprintf("\nGUI VERIFICATION: %d failure(s)\n", nfail);
-exit;
+if nfail > 0 then
+    error("GUI workflow verification failed with " + string(nfail) + " failure(s).");
+    exit(1);
+else
+    exit(0);
+end
