@@ -185,12 +185,13 @@ Tests:
 
 # 15. Verification summary
 
+- **Phase 5 Statistical Integrity suite (`test_statistical_integrity_phase5.sce`): 54 checks, 0 failures** verifying target alignment, AR lag indexing, independent metric hand-recomputation, flat-move guards, equal test counts, backtest execution lag, and forensic proof of the AR(10) mock anomaly vs real market data.
 - **Phase 3 Explanation Assistant suite (`test_explanation_engine.sce`): 83 checks, 0 failures** verifying structured snapshots, multi-model disagreement metrics, Theil U interpretation, prompt grounding, mocked AI response parsing, network failure fallback to Mode A, and GUI integration.
 - **Phase 2 Ridge Forecasting & Validation suite (`test_forecasting_phase2.sce`): 93 checks, 0 failures** verifying 13 features, anti-leakage invariants, Tikhonov conditioning, leverage-adjusted intervals, 5-model comparison, 5-model walk-forward, multi-market data (AAPL & INFY), and GUI callbacks.
 - **Engine tests (`test_model_engine.sce`): 311 checks, 0 failures** across 21 test sections under Scilab 2026.1.0 on Windows.
 - **Market data adapter tests (`test_market_data_adapter.sce`): 70 checks, 0 failures** covering API parsing, cache provenance, error sanitization, and model integration.
 - **GUI workflow test (`test_gui_workflow.sce`): 56 checks, 0 failures**, driving live uicontrol callbacks, market data fetches, tab switching, and graphics contexts.
-- **Total automated coverage: 613 test assertions, 0 failures.**
+- **Total automated coverage: 667 test assertions, 0 failures across 6 independent suites.**
 - Determinism: Repeated identical runs produce bit-for-bit identical predictions, explanations, and equity curves (`norm == 0`).
 - Regenerating sample outputs reproduces identical numbers.
 
@@ -232,6 +233,13 @@ Tests:
     - **Failure Exit Code Hardening:** Verified all test suites terminate with non-zero OS exit codes upon failure, preventing silent CI test pass regressions.
     - **Export Completeness:** Enhanced CSV exports to dynamically capture all 5 models (including Ridge Walk-Forward RMSE) and Theil U statistics.
     - **Forensic Documentation:** Created `PHASE4_RELEASE_READINESS_AUDIT.md` certifying full-system release readiness with clearly documented environmental prerequisites.
+14. **Phase 5: Independent Statistical Audit & Forecast Integrity:**
+    - **Forensic Resolution of AR(10) Anomaly:** Resolved the suspicious AR(10) RMSE on AAPL ($0.0066$) and INFY ($0.0088$). Proved mathematically that offline test mocks contained synthetic 5-day delta periodicity, which unregularized AR(10) solved with near-zero residual variance ($C_t - 2C_{t-5} + C_{t-10} \approx 0$).
+    - **Real Market Data Benchmarking:** Audited actual historical market data from Twelve Data (`AAPL_NASDAQ_120.json` and `INFY_NSE_120.json`), demonstrating that real AR(10) RMSE is **4.1958** (not 0.0066) and Naive persistence (**3.3515**) outperforms all complex models in liquid random-walk regimes.
+    - **Independent Hand-Calculated Verification:** Proved that RMSE, MAE, MAPE, $R^2$, and Theil's $U_2$ formulas match manual hand calculations to within $10^{-12}$ precision.
+    - **Backtest Timing & Friction Verification:** Verified 1-day execution lag, position entry timing, and $0.15\%$ total transaction friction against manual arithmetic.
+    - **Regression Test Suite:** Added `test_statistical_integrity_phase5.sce` with 54 new assertions, raising total automated coverage to **667 passing assertions (0 failures)**.
+    - **Audit Documentation:** Authored `PHASE5_STATISTICAL_INTEGRITY_AUDIT.md`.
 
 # 17. Files
 
@@ -241,10 +249,11 @@ Tests:
                                 test_model_engine.sce  test_market_data_adapter.sce
                                 test_gui_workflow.sce  test_forecasting_phase2.sce
                                 test_explanation_engine.sce
+                                test_statistical_integrity_phase5.sce
                                 generate_sample_outputs.sce  sample_data/  outputs/  tools/
                                 fixtures/mock_gemini_response.json
 PHASE1_PRODUCTION_READINESS_AUDIT.md  PHASE2_FORECASTING_VALIDATION.md  PHASE3_AI_EXPLANATION_VALIDATION.md
-PHASE4_RELEASE_READINESS_AUDIT.md
+PHASE4_RELEASE_READINESS_AUDIT.md  PHASE5_STATISTICAL_INTEGRITY_AUDIT.md
 02_Documentation/  StockVision_README.pdf  StockVision_Project_Report.pdf  source/
 03_Demo_Video/  Scilab_demo_video.mp4  05_GUI_Screenshots/  06_Sample_Outputs/
 config/  market_data_config.json.example  ai_config.json.example

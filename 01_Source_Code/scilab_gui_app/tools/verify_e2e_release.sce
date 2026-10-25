@@ -68,30 +68,37 @@ mprintf("    Tech Growth Test RMSE: Naive=%.4f, LR=%.4f, AR=%.4f, ES=%.4f, Ridge
         cmp_tech.results(1).metrics.rmse, cmp_tech.results(2).metrics.rmse, cmp_tech.results(3).metrics.rmse, ..
         cmp_tech.results(4).metrics.rmse, cmp_tech.results(5).metrics.rmse);
 
-// 2. AAPL NASDAQ
+// 2. AAPL NASDAQ (Offline Mock Fixture Verification)
 cmp_aapl = compare_models(d_aapl, 0.8, 10, 0.3, 0.1, 3, %t);
-audit_assert(size(cmp_aapl.results) == 5, "AAPL 5-model comparison evaluated all 5 models");
-mprintf("    AAPL (NASDAQ) Test RMSE: Naive=%.4f, LR=%.4f, AR=%.4f, ES=%.4f, Ridge=%.4f\n", ..
+audit_assert(size(cmp_aapl.results) == 5, "AAPL 5-model comparison evaluated all 5 models on mock fixture");
+mprintf("    AAPL (Mock Fixture) Test RMSE: Naive=%.4f, LR=%.4f, AR=%.4f, ES=%.4f, Ridge=%.4f\n", ..
         cmp_aapl.results(1).metrics.rmse, cmp_aapl.results(2).metrics.rmse, cmp_aapl.results(3).metrics.rmse, ..
         cmp_aapl.results(4).metrics.rmse, cmp_aapl.results(5).metrics.rmse);
-// Ridge on AAPL benchmark verification:
-r_aapl_ridge = cmp_aapl.results(5);
-r_aapl_naive = cmp_aapl.results(1);
-ridge_rmse = r_aapl_ridge.metrics.rmse;
-naive_rmse = r_aapl_naive.metrics.rmse;
-audit_assert(ridge_rmse < naive_rmse, "AAPL: Ridge Regression beats Naive baseline (" + string(ridge_rmse) + " vs " + string(naive_rmse) + ")");
-audit_assert(r_aapl_ridge.metrics.theil_u2 < 0.98, "AAPL: Ridge Theil U2 indicates genuine predictive skill (" + string(r_aapl_ridge.metrics.theil_u2) + " < 0.98)");
-audit_assert(r_aapl_ridge.metrics.dir_acc >= 65.0, "AAPL: Ridge Directional Accuracy >= 65% (" + string(r_aapl_ridge.metrics.dir_acc) + "%)");
+// Forensic check: Confirm AR(10) fits the mock fixture's 5-day periodicity
+r_aapl_ar = cmp_aapl.results(3);
+audit_assert(r_aapl_ar.metrics.rmse < 0.05, "Forensic Audit: AR(10) fits mock 5-day delta periodicity with RMSE < 0.05 (" + string(r_aapl_ar.metrics.rmse) + ")");
+
+// Real Market Data Verification (from local cache when available)
+real_aapl_cache = APP_DIR + "../cache/market_data/AAPL_NASDAQ_120.json";
+if isfile(real_aapl_cache) then
+    d_real_aapl = mda_load_mock(real_aapl_cache, "AAPL", "NASDAQ");
+    cmp_real_aapl = compare_models(d_real_aapl, 0.8, 10, 0.3, 0.1, 5, %t);
+    mprintf("    Real AAPL (120 bars) Test RMSE: Naive=%.4f, LR=%.4f, AR=%.4f, ES=%.4f, Ridge=%.4f\n", ..
+            cmp_real_aapl.results(1).metrics.rmse, cmp_real_aapl.results(2).metrics.rmse, cmp_real_aapl.results(3).metrics.rmse, ..
+            cmp_real_aapl.results(4).metrics.rmse, cmp_real_aapl.results(5).metrics.rmse);
+    audit_assert(cmp_real_aapl.results(3).metrics.rmse > 3.0, "Real AAPL: AR(10) produces realistic market RMSE > 3.0 (" + string(cmp_real_aapl.results(3).metrics.rmse) + ")");
+    audit_assert(cmp_real_aapl.results(1).metrics.rmse <= cmp_real_aapl.results(3).metrics.rmse, "Real AAPL: Naive random walk baseline beats unregularized AR(10)");
+end
 
 // 3. INFY NSE
 cmp_infy = compare_models(d_infy, 0.8, 10, 0.3, 0.1, 3, %t);
-audit_assert(size(cmp_infy.results) == 5, "INFY 5-model comparison evaluated all 5 models");
-mprintf("    INFY (NSE) Test RMSE: Naive=%.4f, LR=%.4f, AR=%.4f, ES=%.4f, Ridge=%.4f\n", ..
+audit_assert(size(cmp_infy.results) == 5, "INFY 5-model comparison evaluated all 5 models on mock fixture");
+mprintf("    INFY (Mock Fixture) Test RMSE: Naive=%.4f, LR=%.4f, AR=%.4f, ES=%.4f, Ridge=%.4f\n", ..
         cmp_infy.results(1).metrics.rmse, cmp_infy.results(2).metrics.rmse, cmp_infy.results(3).metrics.rmse, ..
         cmp_infy.results(4).metrics.rmse, cmp_infy.results(5).metrics.rmse);
 r_infy_ridge = cmp_infy.results(5);
 r_infy_naive = cmp_infy.results(1);
-audit_assert(r_infy_naive.metrics.rmse <= r_infy_ridge.metrics.rmse, "INFY: Random walk regime confirmed (Naive RMSE " + string(r_infy_naive.metrics.rmse) + " <= Ridge RMSE " + string(r_infy_ridge.metrics.rmse) + ")");
+audit_assert(r_infy_naive.metrics.rmse <= r_infy_ridge.metrics.rmse, "INFY: Random walk regime confirmed on mock fixture (Naive RMSE " + string(r_infy_naive.metrics.rmse) + " <= Ridge RMSE " + string(r_infy_ridge.metrics.rmse) + ")");
 
 // --- Subsystem 5: Walk-Forward Validation Consistency ---
 mprintf("\n--- Subsystem 5: Walk-Forward Cross-Validation ---\n");
