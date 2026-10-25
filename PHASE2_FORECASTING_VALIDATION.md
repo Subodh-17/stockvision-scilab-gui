@@ -1,6 +1,7 @@
 # StockVision Scilab GUI — Phase 2: Validated Forecasting Model & Empirical Audit
 
 **Repository:** `https://github.com/Subodh-17/stockvision-scilab-gui`  
+**Commit:** `c8d509d`  
 **Local Root:** `E:\Projects\StockVision`  
 **Audit & Release Date:** 2026-10-25  
 **Runtime Environment:** Scilab 2026.1.0 (Windows 64-bit CLI & GUI)  
